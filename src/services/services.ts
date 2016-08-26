@@ -5201,6 +5201,7 @@ namespace ts {
             }
 
             const typeChecker = program.getTypeChecker();
+            debugger;
             let symbol = typeChecker.getSymbolAtLocation(node);
 
             // Could not find a symbol e.g. node is string or number keyword,
