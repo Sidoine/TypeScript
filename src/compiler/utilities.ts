@@ -1200,6 +1200,16 @@ namespace ts {
         return false;
     }
 
+    //move?
+    export function isCalledExpression(node: Node) {
+        return node && node.parent && node.parent.kind === SyntaxKind.CallExpression && (<CallExpression>node.parent).expression === node;
+    }
+
+    //name
+    export function isNewedExpression(node: Node) {
+        return node && node.parent && node.parent.kind === SyntaxKind.NewExpression && (<NewExpression>node.parent).expression === node;
+    }
+
     export function isExternalModuleNameRelative(moduleName: string): boolean {
         // TypeScript 1.0 spec (April 2014): 11.2.1
         // An external module name is "relative" if the first term is "." or "..".

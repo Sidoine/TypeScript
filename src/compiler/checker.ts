@@ -18063,11 +18063,31 @@ namespace ts {
                             return sig.thisParameter;
                         }
                     }
-                    // fallthrough
+
+                    //neater?
+                    Debug.assert(isExpression(node));
+                    return checkExpression(<Expression> node).symbol;
+                    //don't fallthrough
 
                 case SyntaxKind.SuperKeyword:
-                    const type = isExpression(node) ? checkExpression(<Expression>node) : getTypeFromTypeNode(<TypeNode>node);
-                    return type.symbol;
+                    //const type = isExpression(node) ? checkExpression(<Expression>node) : getTypeFromTypeNode(<TypeNode>node);
+                    //return type.symbol;
+
+                    //ThisKeyword and SuperKeyword are both expressions!
+                    Debug.assert(isExpression(node));
+                    const type = checkExpression(<Expression>node);
+                    const symbol = type.symbol;
+                    return symbol;
+
+                    //TODO
+                    /*if (isCalledExpression(node)) {
+                        const ctr = symbol.members["__constructor"];
+                        Debug.assert(!!ctr); //is this a guarantee? NO, IT IS NOT
+                        return ctr;
+                    }
+                    else {
+                        return symbol;
+                    }*/
 
                 case SyntaxKind.ThisType:
                     return getTypeFromTypeNode(<TypeNode>node).symbol;

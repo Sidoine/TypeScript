@@ -2788,19 +2788,35 @@ namespace ts {
         return node && node.parent && node.parent.kind === SyntaxKind.PropertyAccessExpression && (<PropertyAccessExpression>node.parent).name === node;
     }
 
+    function climbPastPropertyAccess(node: Node) {
+        return isRightSideOfPropertyAccess(node) ? node.parent : node;
+    }
+
     function isCallExpressionTarget(node: Node): boolean {
-        if (isRightSideOfPropertyAccess(node)) {
-            node = node.parent;
-        }
-        return node && node.parent && node.parent.kind === SyntaxKind.CallExpression && (<CallExpression>node.parent).expression === node;
+        return isCalledExpression(climbPastPropertyAccess(node));
     }
 
     function isNewExpressionTarget(node: Node): boolean {
-        if (isRightSideOfPropertyAccess(node)) {
-            node = node.parent;
-        }
-        return node && node.parent && node.parent.kind === SyntaxKind.NewExpression && (<CallExpression>node.parent).expression === node;
+        return isNewedExpression(climbPastPropertyAccess(node));
     }
+
+    //function isCallOrNewExpressionTarget(node: Node, kind: SyntaxKind) {
+    //    const target = climbPastPropertyAccess(node);
+    //    return target && target.parent && target.parent.kind === kind && (<CallExpression>target.parent).expression === target;
+    //}
+
+    //name
+    function getCallOrNewExpressionThatThisTargets(node: Node): CallExpression | NewExpression | undefined {
+        const target = climbPastPropertyAccess(node);
+        if (!target && target.parent) {
+            return undefined;
+        }
+        const parent = target.parent;
+        return (parent.kind === SyntaxKind.CallExpression || parent.kind === SyntaxKind.NewExpression) &&
+            (<CallExpression | NewExpression>parent).expression === target && (<CallExpression | NewExpression>parent);
+    }
+
+    //see https://github.com/Microsoft/TypeScript/pull/10540/files#diff-233e1126c0abc811c4098757f9e4516eR2809
 
     function isNameOfModuleDeclaration(node: Node) {
         return node.parent.kind === SyntaxKind.ModuleDeclaration && (<ModuleDeclaration>node.parent).name === node;
@@ -5068,6 +5084,20 @@ namespace ts {
             };
         }
 
+        function getDefinitionFromSignature(signature: Signature): DefinitionInfo[] {
+            const typeChecker = program.getTypeChecker();
+            //TODO: caller should ensure that this exists
+            //some of this is duplicate of code in getDefinitionFromSymbol
+            const decl = signature.declaration;
+            const symbol = decl.symbol;
+            const symbolKind = getSymbolKind(symbol, decl);
+            const symbolName = typeChecker.symbolToString(symbol);
+            const containerSymbol = symbol.parent;
+            const containerName = containerSymbol ? typeChecker.symbolToString(containerSymbol, decl) : "";
+            const def = createDefinitionInfo(decl, symbolKind, symbolName, containerName);
+            return [def];
+        }
+
         function getDefinitionFromSymbol(symbol: Symbol, node: Node): DefinitionInfo[] {
             const typeChecker = program.getTypeChecker();
             const result: DefinitionInfo[] = [];
@@ -5201,13 +5231,42 @@ namespace ts {
             }
 
             const typeChecker = program.getTypeChecker();
-            let symbol = typeChecker.getSymbolAtLocation(node);
+            debugger;
+
+            let symbol: Symbol;
+            //todo: similar for new
+            //TODO: this code should be in checker...
+            const callOrNewExpression = getCallOrNewExpressionThatThisTargets(node);
+            if (callOrNewExpression) {
+                //neater
+                const sig = typeChecker.getResolvedSignature(callOrNewExpression);
+                FOO
+
+                //symbol = sig.declaration && sig.declaration.symbol;
+                //if (!symbol) {
+                //    //neater
+                //    symbol = typeChecker.getSymbolAtLocation(node);
+                //}
+            }
+            else {
+                symbol = typeChecker.getSymbolAtLocation(node);
+            }
+            //let symbol = typeChecker.getSymbolAtLocation(node);
 
             // Could not find a symbol e.g. node is string or number keyword,
             // or the symbol was an internal symbol and does not have a declaration e.g. undefined symbol
             if (!symbol) {
                 return undefined;
             }
+
+            //neater
+            /*if (node.kind === SyntaxKind.SuperKeyword && isCalledExpression(node)) {
+                const ctr = symbol.members["__constructor"];
+                if (ctr) {
+                    //Debug.assert(!!ctr); //is this a guarantee? NO, IT IS NOT
+                    symbol = ctr;
+                }
+            }*/
 
             // If this is an alias, and the request came at the declaration location
             // get the aliased symbol instead. This allows for goto def on an import e.g.

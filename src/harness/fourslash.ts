@@ -1582,7 +1582,7 @@ namespace FourSlash {
                 this.raiseError(`goToDefinition - expected to 0 definition locations but got ${definitions.length}`);
             }
             else if (!foundDefinitions && !negative) {
-                this.raiseError("goToDefinition - expected to at least one definition location but got 0");
+                this.raiseError("goToDefinition - expected to find at least one definition location but got 0");
             }
         }
 
