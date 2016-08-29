@@ -1,5 +1,6 @@
 /// <reference path="checker.ts"/>
 /// <reference path="declarationEmitter.ts"/>
+/// <reference path="luaEmitter.ts"/>
 
 /* @internal */
 module ts {
@@ -12,19 +13,22 @@ module ts {
         Auto      = 0x00000000,  // No preferred name
         CountMask = 0x0FFFFFFF,  // Temp variable counter
         _i        = 0x10000000,  // Use/preference flag for '_i'
-    }
+    }     
 
     // targetSourceFile is when users only want one file in entire project to be emitted. This is used in compileOnSave feature
     export function emitFiles(resolver: EmitResolver, host: EmitHost, targetSourceFile: SourceFile): EmitResult {
         // emit output for the __extends helper function
+		/*
         const extendsHelper = `
-var __extends = (this && this.__extends) || function (d, b) {
+local __extends = (this && this.__extends) || function (d, b) {
     for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
     function __() { this.constructor = d; }
     __.prototype = b.prototype;
-    d.prototype = new __();
-};`;
-
+    d.prototype = new __();  
+};`; */   
+		//for lua
+		const extendsHelper = lua_extendsHelper();
+		
         // emit output for the __decorate helper function
         const decorateHelper = `
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
@@ -53,11 +57,13 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
         let sourceMapDataList: SourceMapData[] = compilerOptions.sourceMap || compilerOptions.inlineSourceMap ? [] : undefined;
         let diagnostics: Diagnostic[] = [];
         let newLine = host.getNewLine();
+		let isHasExports = false;
+		let isHasExport = false;
 
         if (targetSourceFile === undefined) {
             forEach(host.getSourceFiles(), sourceFile => {
                 if (shouldEmitToOwnFile(sourceFile, compilerOptions)) {
-                    let jsFilePath = getOwnEmitOutputFilePath(sourceFile, host, ".js");
+                    let jsFilePath = getOwnEmitOutputFilePath(sourceFile, host, ".lua"); // for lua
                     emitFile(jsFilePath, sourceFile);
                 }
             });
@@ -69,7 +75,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
         else {
             // targetSourceFile is specified (e.g calling emitter from language service or calling getSemanticDiagnostic from language service)
             if (shouldEmitToOwnFile(targetSourceFile, compilerOptions)) {
-                let jsFilePath = getOwnEmitOutputFilePath(targetSourceFile, host, ".js");
+                let jsFilePath = getOwnEmitOutputFilePath(targetSourceFile, host, ".lua"); // for lua
                 emitFile(jsFilePath, targetSourceFile);
             }
             else if (!isDeclarationFile(targetSourceFile) && compilerOptions.out) {
@@ -143,8 +149,45 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
             let writeEmittedFiles = writeJavaScriptFile;
 
             let detachedCommentsInfo: { nodePos: number; detachedCommentEndPos: number }[];
+			  
+			let lua_operatorTokens : { [s: number]: {[s: string]:string;}; } = {  
+				[SyntaxKind.LessThanLessThanToken]:{'op':'bit.lshift', 'flag':'replaceWithFun'},
+				[SyntaxKind.GreaterThanGreaterThanToken]:{'op':'bit.rshift', 'flag':'replaceWithFun'},
+				[SyntaxKind.GreaterThanGreaterThanGreaterThanToken]:{'op':'bit.arshift', 'flag':'replaceWithFun'},
+				[SyntaxKind.AmpersandToken]:{'op':'bit.band', 'flag':'replaceWithFun'},
+				[SyntaxKind.BarToken]:{'op':'bit.bor', 'flag':'replaceWithFun'},
+				[SyntaxKind.CaretToken]:{'op':'bit.bxor', 'flag':'replaceWithFun'},
+				
+				[SyntaxKind.AmpersandAmpersandToken]:{'op':'and', 'flag':'replaceWithOp'},
+				[SyntaxKind.BarBarToken]:{'op':'or', 'flag':'replaceWithOp'},
+				[SyntaxKind.EqualsEqualsToken]:{'op':'==', 'flag':'replaceWithOp'},
+				[SyntaxKind.EqualsEqualsEqualsToken]:{'op':'==', 'flag':'replaceWithOp'},
+				[SyntaxKind.ExclamationEqualsToken]:{'op':'~=', 'flag':'replaceWithOp'},
+				[SyntaxKind.ExclamationEqualsEqualsToken]:{'op':'~=', 'flag':'replaceWithOp'},
+				[SyntaxKind.PlusToken]:{'op':'..', 'flag':'replaceWithOpWhenIsString'},
+				
+				[SyntaxKind.PlusEqualsToken]:{'op':'+', 'flag':'replaceWithOneOp'},
+				[SyntaxKind.MinusEqualsToken]:{'op':'-', 'flag':'replaceWithOneOp'},
+				[SyntaxKind.AsteriskEqualsToken]:{'op':'*', 'flag':'replaceWithOneOp'},
+				[SyntaxKind.SlashEqualsToken]:{'op':'/', 'flag':'replaceWithOneOp'},
+				[SyntaxKind.PercentEqualsToken]:{'op':'%', 'flag':'replaceWithOneOp'},
+				
+				[SyntaxKind.LessThanLessThanEqualsToken]:{'op':'bit.lshift', 'flag':'replaceWithOneFun'},
+				[SyntaxKind.GreaterThanGreaterThanEqualsToken]:{'op':'bit.rshift', 'flag':'replaceWithOneFun'},
+				[SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken]:{'op':'bit.arshift', 'flag':'replaceWithOneFun'},
+				[SyntaxKind.AmpersandEqualsToken]:{'op':'bit.band', 'flag':'replaceWithOneFun'},
+				[SyntaxKind.BarEqualsToken]:{'op':'bit.bor', 'flag':'replaceWithOneFun'},
+				[SyntaxKind.CaretEqualsToken]:{'op':'bit.bxor', 'flag':'replaceWithOneFun'},
+			};  
 
-            let writeComment = writeCommentRange;
+			// for lua
+            //let writeComment = writeCommentRange;
+			function writeCommentRangeForLua(currentSourceFile: SourceFile, writer: EmitTextWriter, comment: CommentRange, newLine: string) {
+				write ("--[[ ");
+				writeCommentRange(currentSourceFile, writer, comment, newLine);
+				write (" ]]");
+			}
+            let writeComment = writeCommentRangeForLua;
 
             /** Emit a node */
             let emit = emitNodeWithoutSourceMap;
@@ -175,7 +218,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
             let sourceMapData: SourceMapData;
 
             if (compilerOptions.sourceMap || compilerOptions.inlineSourceMap) {
-                initializeEmitterWithSourceMaps();
+                initializeEmitterWithSourceMaps(); 
             }
 
             if (root) {
@@ -349,7 +392,11 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     sourceIndex: 0
                 };
                 let lastEncodedNameIndex = 0;
-
+				
+				function base64VLQFormatEncodeEx(index:number){
+					return index + '|';
+				}
+				
                 // Encoding for sourcemap span
                 function encodeLastRecordedSourceMapSpan() {
                     if (!lastRecordedSourceMapSpan || lastRecordedSourceMapSpan === lastEncodedSourceMapSpan) {
@@ -372,23 +419,44 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         prevEncodedEmittedColumn = 1;
                     }
 
+					/*
                     // 1. Relative Column 0 based
-                    sourceMapData.sourceMapMappings += base64VLQFormatEncode(lastRecordedSourceMapSpan.emittedColumn - prevEncodedEmittedColumn);
+                    sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.emittedColumn - prevEncodedEmittedColumn);
 
                     // 2. Relative sourceIndex
-                    sourceMapData.sourceMapMappings += base64VLQFormatEncode(lastRecordedSourceMapSpan.sourceIndex - lastEncodedSourceMapSpan.sourceIndex);
+                    sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.sourceIndex - lastEncodedSourceMapSpan.sourceIndex);
 
                     // 3. Relative sourceLine 0 based
-                    sourceMapData.sourceMapMappings += base64VLQFormatEncode(lastRecordedSourceMapSpan.sourceLine - lastEncodedSourceMapSpan.sourceLine);
+                    sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.sourceLine - lastEncodedSourceMapSpan.sourceLine);
 
                     // 4. Relative sourceColumn 0 based
-                    sourceMapData.sourceMapMappings += base64VLQFormatEncode(lastRecordedSourceMapSpan.sourceColumn - lastEncodedSourceMapSpan.sourceColumn);
+                    sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.sourceColumn - lastEncodedSourceMapSpan.sourceColumn);
 
                     // 5. Relative namePosition 0 based
                     if (lastRecordedSourceMapSpan.nameIndex >= 0) {
-                        sourceMapData.sourceMapMappings += base64VLQFormatEncode(lastRecordedSourceMapSpan.nameIndex - lastEncodedNameIndex);
+                        sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.nameIndex - lastEncodedNameIndex);
                         lastEncodedNameIndex = lastRecordedSourceMapSpan.nameIndex;
                     }
+					*/
+					
+					// 1. Relative Column 0 based
+                    sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.emittedColumn);
+
+                    // 2. Relative sourceIndex
+                    sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.sourceIndex);
+
+                    // 3. Relative sourceLine 0 based
+                    sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.sourceLine);
+
+                    // 4. Relative sourceColumn 0 based
+                    sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.sourceColumn);
+
+                    // 5. Relative namePosition 0 based
+                    if (lastRecordedSourceMapSpan.nameIndex >= 0) {
+                        sourceMapData.sourceMapMappings += base64VLQFormatEncodeEx(lastRecordedSourceMapSpan.nameIndex);
+                        lastEncodedNameIndex = lastRecordedSourceMapSpan.nameIndex;
+                    }
+					
 
                     lastEncodedSourceMapSpan = lastRecordedSourceMapSpan;
                     sourceMapData.sourceMapDecodedMappings.push(lastEncodedSourceMapSpan);
@@ -570,10 +638,11 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 function recordScopeNameEnd() {
                     sourceMapNameIndices.pop();
                 };
-
+				
                 function writeCommentRangeWithMap(curentSourceFile: SourceFile, writer: EmitTextWriter, comment: CommentRange, newLine: string) {
                     recordSourceMapSpan(comment.pos);
-                    writeCommentRange(currentSourceFile, writer, comment, newLine);
+                    //writeCommentRange(currentSourceFile, writer, comment, newLine);
+					writeCommentRangeForLua(currentSourceFile, writer, comment, newLine); // for lua
                     recordSourceMapSpan(comment.end);
                 }
 
@@ -627,12 +696,12 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     if (compilerOptions.inlineSourceMap) {
                         // Encode the sourceMap into the sourceMap url
                         let base64SourceMapText = convertToBase64(sourceMapText);
-                        sourceMapUrl = `//# sourceMappingURL=data:application/json;base64,${base64SourceMapText}`;
+                        sourceMapUrl = `--# sourceMappingURL=data:application/json;base64,${base64SourceMapText}`;
                     }
                     else {
                         // Write source map file
                         writeFile(host, diagnostics, sourceMapData.sourceMapFilePath, sourceMapText, /*writeByteOrderMark*/ false);
-                        sourceMapUrl = `//# sourceMappingURL=${sourceMapData.jsSourceMappingURL}`;
+                        sourceMapUrl = `--# sourceMappingURL=${sourceMapData.jsSourceMappingURL}`;
                     }
 
                     // Write sourcemap url to the js file and write the js file
@@ -747,7 +816,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     else {
                         write(" ");
                     }
-                    write("var ");
+                    //write("var "); 
+					write(lua_getVarDefineString() + " ");
                     emitCommaList(tempVariables);
                     write(";");
                 }
@@ -876,7 +946,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     writeLine();
                     emit(nodes[i]);
                 }
-            }
+            } 
 
             function isBinaryOrOctalIntegerLiteral(node: LiteralExpression, text: string): boolean {
                 if (node.kind === SyntaxKind.NumericLiteral && text.length > 1) {
@@ -890,30 +960,34 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 }
 
                 return false;
-            }
+            } 
 
             function emitLiteral(node: LiteralExpression) {
                 let text = getLiteralText(node);
 
-                if ((compilerOptions.sourceMap || compilerOptions.inlineSourceMap) && (node.kind === SyntaxKind.StringLiteral || isTemplateLiteralKind(node.kind))) {
+				if ( node.kind === SyntaxKind.RegularExpressionLiteral ) {
+					let ss = text.split('/'); 
+					write('__new(RegExp, [[/' + ss[1] + '/]], "' + ss[2] + '", true)');
+				}
+                else if ((compilerOptions.sourceMap || compilerOptions.inlineSourceMap) && (node.kind === SyntaxKind.StringLiteral || isTemplateLiteralKind(node.kind))) {
                     writer.writeLiteral(text);
                 }
                 // For versions below ES6, emit binary & octal literals in their canonical decimal form.
                 else if (languageVersion < ScriptTarget.ES6 && isBinaryOrOctalIntegerLiteral(node, text)) {
                     write(node.text);
                 }
-                else {
-                    write(text);
-                }
-            }
+                else { 
+                    write(text); 
+                } 
+            } 
 
             function getLiteralText(node: LiteralExpression) {
                 // Any template literal or string literal with an extended escape
                 // (e.g. "\u{0067}") will need to be downleveled as a escaped string literal.
                 if (languageVersion < ScriptTarget.ES6 && (isTemplateLiteralKind(node.kind) || node.hasExtendedUnicodeEscape)) {
-                    return getQuotedEscapedLiteralText('"', node.text, '"');
+                    return getQuotedEscapedLiteralText('"', node.text, '"'); 
                 }
-                
+                 
                 // If we don't need to downlevel and we can reach the original source text using
                 // the node's parent reference, then simply get the text as it was originally written.
                 if (node.parent) {
@@ -1269,7 +1343,11 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         return;
                     }
                 }
-                if (!node.parent) {
+
+                if (node.text === "arguments") {
+                    write("...");
+                }    
+                else if (!node.parent) {
                     write(node.text);
                 }
                 else if (!isNotExpressionIdentifier(node)) {
@@ -1296,10 +1374,10 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 else {
                     var flags = resolver.getNodeCheckFlags(node);
                     if (flags & NodeCheckFlags.SuperInstance) {
-                        write("_super.prototype");
+                        write("_super"); // for lua write("_super.prototype");
                     }
                     else {
-                        write("_super");
+                        write("_super.constructor"); // for lua write("_super");
                     }
                 }
             }
@@ -1419,12 +1497,12 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
             function emitArrayLiteral(node: ArrayLiteralExpression) {
                 let elements = node.elements;
                 if (elements.length === 0) {
-                    write("[]");
+                    write("__new(Array)");
                 }
                 else if (languageVersion >= ScriptTarget.ES6 || !forEach(elements, isSpreadElementExpression)) {
-                    write("[");
+                    write("__new(Array, ");
                     emitLinePreservingList(node, node.elements, elements.hasTrailingComma, /*spacesBetweenBraces:*/ false);
-                    write("]");
+                    write(")");
                 }
                 else {
                     emitListWithSpread(elements, /*needsUniqueCopy*/ true, /*multiLine*/(node.flags & NodeFlags.MultiLine) !== 0,
@@ -1589,7 +1667,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         write(", ");
                     }
                 }
-            }
+            } 
 
             function emitObjectLiteral(node: ObjectLiteralExpression): void {
                 let properties = node.properties;
@@ -1682,7 +1760,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 
             function emitPropertyAssignment(node: PropertyDeclaration) {
                 emit(node.name, /*allowGeneratedIdentifiers*/ false);
-                write(": ");
+                //write(": ");
+                write("= ");
                 emit(node.initializer);
             }
 
@@ -1765,9 +1844,11 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 
                 emit(node.expression);
                 let indentedBeforeDot = indentIfOnDifferentLines(node, node.expression, node.dotToken);
-                write(".");
+				lua_wirteCallDot(writer, node);
                 let indentedAfterDot = indentIfOnDifferentLines(node, node.dotToken, node.name);
-                emit(node.name, /*allowGeneratedIdentifiers*/ false);
+				lua_wirteCallName(writer, node, ()=>{
+					emit(node.name, /*allowGeneratedIdentifiers*/ false);
+				});  
                 decreaseIndentIf(indentedBeforeDot, indentedAfterDot);
             }
 
@@ -1784,6 +1865,12 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 emit(node.expression);
                 write("[");
                 emit(node.argumentExpression);
+				
+				// for lua
+				if ( (node.flags&NodeFlags.IsArray) || (node.expression.flags&NodeFlags.IsArray) ) {
+					write(" + 1");
+				}
+				
                 write("]");
             }
 
@@ -1855,38 +1942,57 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 emitListWithSpread(node.arguments, /*needsUniqueCopy*/ false, /*multiLine*/ false, /*trailingComma*/ false, /*useConcat*/ true);
                 write(")");
             }
-
-            function emitCallExpression(node: CallExpression) {
-                if (languageVersion < ScriptTarget.ES6 && hasSpreadElement(node.arguments)) {
+			
+			function emitCallExpression(node: CallExpression) {
+				lua_changeNodeFlagInEmitCallExpression(node);
+			
+			    if (languageVersion < ScriptTarget.ES6 && hasSpreadElement(node.arguments)) {
                     emitCallWithSpread(node);
                     return;
                 }
                 let superCall = false;
                 if (node.expression.kind === SyntaxKind.SuperKeyword) {
+					lua_clearNodeFlagInEmitCallExpression(true, node);
                     emitSuper(node.expression);
-                    superCall = true;
+					superCall = true; 
                 }
-                else {
+                else {    
+					superCall = node.expression.kind === SyntaxKind.PropertyAccessExpression && (<PropertyAccessExpression>node.expression).expression.kind === SyntaxKind.SuperKeyword; //add by qjb
+					lua_clearNodeFlagInEmitCallExpression(superCall, node);
+					if ( lua_isSomeGlobalStringMethod(node) ) {
+						lua_clearNodeFlagInEmitCallExpression(true, node);
+						lua_setIngoreClassObjectMethodCall(node);
+						lua_writeSomeGlobalStringMethod(writer, node);
+					}
                     emit(node.expression);
-                    superCall = node.expression.kind === SyntaxKind.PropertyAccessExpression && (<PropertyAccessExpression>node.expression).expression.kind === SyntaxKind.SuperKeyword;
                 }
+				
                 if (superCall && languageVersion < ScriptTarget.ES6) {
-                    write(".call(");
+                    write("("); // [for lua] write(".call(");
                     emitThis(node.expression);
-                    if (node.arguments.length) {
+                    if (node.arguments.length) { 
                         write(", ");
-                        emitCommaList(node.arguments);
+                        emitCommaList(node.arguments);  
                     }
                     write(")");
                 }
                 else {
-                    write("(");
-                    emitCommaList(node.arguments);
-                    write(")");
-                }
-            }
+					if ( lua_isSomeGlobalStringMethod(node) ) {
+						lua_writeSomeGlobalStringMethodParams(writer, node, emit, ()=>{
+							emitCommaList(node.arguments);
+						})
+					}
+					else {
+						write("(");
+						lua_wirteCallParams(writer, node, emit, ()=>{
+							emitCommaList(node.arguments);
+						}) 
+						write(")"); 
+					} 
+                } 
+			}
 
-            function emitNewExpression(node: NewExpression) {
+            function emitNewExpression_bak(node: NewExpression) {
                 write("new ");
 
                 // Spread operator logic can be supported in new expressions in ES5 using a combination
@@ -1927,6 +2033,16 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         write(")");
                     }
                 }
+            }
+			
+			function emitNewExpression(node: NewExpression) { // for lua
+                write("__new(");
+				emit(node.expression);
+                if (node.arguments && node.arguments.length > 0) {
+					write(", ");
+                    emitCommaList(node.arguments);
+                }
+                write(")");
             }
 
             function emitTaggedTemplateExpression(node: TaggedTemplateExpression): void {
@@ -1992,8 +2108,9 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 
             function emitTypeOfExpression(node: TypeOfExpression) {
                 write(tokenToString(SyntaxKind.TypeOfKeyword));
-                write(" ");
+                write("(");
                 emit(node.expression);
+				write(")");
             }
 
             function isNameOfExportedSourceLevelDeclarationInSystemExternalModule(node: Node): boolean {
@@ -2014,7 +2131,6 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 
             function emitPrefixUnaryExpression(node: PrefixUnaryExpression) {
                 const exportChanged = isNameOfExportedSourceLevelDeclarationInSystemExternalModule(node.operand);
-
                 if (exportChanged) {
                     // emit
                     // ++x
@@ -2024,8 +2140,25 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     emitNodeWithoutSourceMap(node.operand);
                     write(`", `);
                 }
-
-                write(tokenToString(node.operator));
+				
+				if ( node.operator !== SyntaxKind.PlusPlusToken && node.operator !== SyntaxKind.MinusMinusToken ) {
+					if ( node.operator == SyntaxKind.ExclamationToken) {
+						write("not ");
+					}
+					else if (node.operator == SyntaxKind.TildeToken) {
+						write("bit.bnot(");
+						emit(node.operand);
+						write(")");
+						if (exportChanged) {
+							write(")");
+						}
+						return;
+					}
+					else {
+						write(tokenToString(node.operator));
+					}
+				} 
+					
                 // In some cases, we need to emit a space between the operator and the operand. One obvious case
                 // is when the operator is an identifier, like delete or typeof. We also need to do this for plus
                 // and minus expressions in certain cases. Specifically, consider the following two cases (parens
@@ -2047,7 +2180,32 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         write(" ");
                     }
                 }
-                emit(node.operand);
+
+				if ( node.operator === SyntaxKind.PlusPlusToken || node.operator === SyntaxKind.MinusMinusToken ) {
+					let operatorname:string = node.operator === SyntaxKind.PlusPlusToken ? "+" : "-";
+					if ( node.parent && (node.parent.kind==SyntaxKind.BinaryExpression 
+						|| node.parent.kind==SyntaxKind.VariableDeclaration
+						|| node.parent.kind==SyntaxKind.ParenthesizedExpression) ) {
+							
+						//write("(function() <i> = <i> + 1; return <i>; end)()".replace(/<i>/g, name));
+						write("(function() ");
+						emit(node.operand);
+						write(" = ");
+						emit(node.operand);
+						write(" <op> 1; return ".replace("<op>", operatorname));
+						emit(node.operand);
+						write("; end)()");
+					}
+					else {
+						emit(node.operand);
+						write(" = "); 
+						emit(node.operand);
+						write(" <op> 1".replace("<op>", operatorname));
+					}
+				} 
+				else {
+					emit(node.operand);
+				}
 
                 if (exportChanged) {
                     write(")");
@@ -2075,8 +2233,31 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     }
                 }
                 else {
-                    emit(node.operand);
-                    write(tokenToString(node.operator));
+					if ( node.operator === SyntaxKind.PlusPlusToken || node.operator === SyntaxKind.MinusMinusToken ) {
+						let operatorname:string = node.operator === SyntaxKind.PlusPlusToken ? "+" : "-";
+						if ( node.parent && (node.parent.kind==SyntaxKind.BinaryExpression 
+							|| node.parent.kind==SyntaxKind.VariableDeclaration
+							|| node.parent.kind==SyntaxKind.ParenthesizedExpression) ) {
+							//write("(function() local _i = a; a = a - 1; return _i; end)()");
+							write("(function() local _i=");
+							emit(node.operand);
+							write("; ");
+							emit(node.operand);
+							write(" = ");
+							emit(node.operand);
+							write(" <op> 1; return _i; end)()".replace("<op>", operatorname));
+						}
+						else {
+							emit(node.operand);
+							write(" = ");
+							emit(node.operand);
+							write(" <op> 1".replace("<op>", operatorname));
+						}
+					} 
+					else {
+						emit(node.operand);
+						write(tokenToString(node.operator));
+					}
                 }
             }
 
@@ -2129,10 +2310,79 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         write(`${exportFunctionForFile}("`);
                         emitNodeWithoutSourceMap(node.left);
                         write(`", `);
-                    }
+                    }  
+
+					let opToken = lua_operatorTokens[node.operatorToken.kind];
+					if (opToken){ 
+						if ( opToken['flag'] == 'replaceWithFun' ) {
+							let indentedBeforeOperator = indentIfOnDifferentLines(node, node.left, node.operatorToken, node.operatorToken.kind !== SyntaxKind.CommaToken ? " " : undefined);
+							write(opToken['op'] + "(");
+							emit(node.left);
+							write(",");
+							let indentedAfterOperator = indentIfOnDifferentLines(node, node.operatorToken, node.right, " ");
+							emit(node.right);
+							write(")");
+							decreaseIndentIf(indentedBeforeOperator, indentedAfterOperator);
+							if (exportChanged) {
+								write(")");
+							} 
+							return; 
+						}
+						else if ( opToken['flag'] == 'replaceWithOp' 
+							|| (opToken['flag'] == 'replaceWithOpWhenIsString' && (node.flags&NodeFlags.IsString) ) ) {
+							emit(node.left);
+							let indentedBeforeOperator = indentIfOnDifferentLines(node, node.left, node.operatorToken, node.operatorToken.kind !== SyntaxKind.CommaToken ? " " : undefined);
+							write(opToken['op']);
+							let indentedAfterOperator = indentIfOnDifferentLines(node, node.operatorToken, node.right, " ");
+							emit(node.right);
+							decreaseIndentIf(indentedBeforeOperator, indentedAfterOperator);
+							if (exportChanged) {
+								write(")");
+							}
+							return;	
+						}
+						else if ( opToken['flag'] == 'replaceWithOneOp' ) {
+							emit(node.left);
+							let indentedBeforeOperator = indentIfOnDifferentLines(node, node.left, node.operatorToken, node.operatorToken.kind !== SyntaxKind.CommaToken ? " " : undefined);
+							write(" = ");
+							emit(node.left);
+							if ( opToken['op'] == '+' && (node.flags&NodeFlags.IsString) ) {
+								write( ' .. ' );
+							}
+							else {
+								write( opToken['op'] );
+							}
+							write("(");
+							let indentedAfterOperator = indentIfOnDifferentLines(node, node.operatorToken, node.right, " ");
+							emit(node.right);
+							write(")");
+							decreaseIndentIf(indentedBeforeOperator, indentedAfterOperator);
+							if (exportChanged) {
+								write(")");
+							}
+							return; 
+						}
+						else if ( opToken['flag'] == 'replaceWithOneFun' ) {
+							emit(node.left);
+							let indentedBeforeOperator = indentIfOnDifferentLines(node, node.left, node.operatorToken, node.operatorToken.kind !== SyntaxKind.CommaToken ? " " : undefined);
+							write(" = ");
+							write(opToken['op'] + "(");
+							emit(node.left);
+							write(",");
+							let indentedAfterOperator = indentIfOnDifferentLines(node, node.operatorToken, node.right, " ");
+							emit(node.right);
+							write(")");
+							decreaseIndentIf(indentedBeforeOperator, indentedAfterOperator);
+							if (exportChanged) {
+								write(")");
+							}
+							return;
+						}
+					}
+					
                     emit(node.left);
-                    let indentedBeforeOperator = indentIfOnDifferentLines(node, node.left, node.operatorToken, node.operatorToken.kind !== SyntaxKind.CommaToken ? " " : undefined);
-                    write(tokenToString(node.operatorToken.kind));
+					let indentedBeforeOperator = indentIfOnDifferentLines(node, node.left, node.operatorToken, node.operatorToken.kind !== SyntaxKind.CommaToken ? " " : undefined);
+ 					write(tokenToString(node.operatorToken.kind));
                     let indentedAfterOperator = indentIfOnDifferentLines(node, node.operatorToken, node.right, " ");
                     emit(node.right);
                     decreaseIndentIf(indentedBeforeOperator, indentedAfterOperator);
@@ -2149,12 +2399,14 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
             function emitConditionalExpression(node: ConditionalExpression) {
                 emit(node.condition);
                 let indentedBeforeQuestion = indentIfOnDifferentLines(node, node.condition, node.questionToken, " ");
-                write("?");
+                //write("?");
+                write("and");
                 let indentedAfterQuestion = indentIfOnDifferentLines(node, node.questionToken, node.whenTrue, " ");
                 emit(node.whenTrue);
                 decreaseIndentIf(indentedBeforeQuestion, indentedAfterQuestion);
                 let indentedBeforeColon = indentIfOnDifferentLines(node, node.whenTrue, node.colonToken, " ");
-                write(":");
+                //write(":");
+                write("or");
                 let indentedAfterColon = indentIfOnDifferentLines(node, node.colonToken, node.whenFalse, " ");
                 emit(node.whenFalse);
                 decreaseIndentIf(indentedBeforeColon, indentedAfterColon);
@@ -2181,27 +2433,105 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
             }
 
             function emitBlock(node: Block) {
-                if (isSingleLineEmptyBlock(node)) {
-                    emitToken(SyntaxKind.OpenBraceToken, node.pos);
+				// for lua
+				let isIfBlock = false;
+				let isForBlock = false;
+				let isWhileBlock = false;
+				let isDoBlock = false;
+				let isTryBlock = false;
+				let isCatchBlock = false;
+				let isModuleBlock = false;
+				let isAllForBlock = false;
+				let isForInBlock = false;
+				let isForOfBlock = false;
+				if ( node.parent ) {
+					isIfBlock = node.parent.kind === SyntaxKind.IfStatement;
+					isForBlock = node.parent.kind === SyntaxKind.ForStatement;
+					isWhileBlock = node.parent.kind === SyntaxKind.WhileStatement;
+					isDoBlock = node.parent.kind === SyntaxKind.DoStatement;
+					isTryBlock = node.parent.kind === SyntaxKind.TryStatement;
+					isCatchBlock = node.parent.kind === SyntaxKind.CatchClause;
+					isModuleBlock = node.parent.kind === SyntaxKind.ModuleDeclaration;
+					isForInBlock = (node.parent.kind === SyntaxKind.ForInStatement);
+					isForOfBlock = (node.parent.kind === SyntaxKind.ForOfStatement);
+					isAllForBlock = isForInBlock || isForBlock || isForOfBlock;
+				}
+				
+				let isNotNeedOpenCloseBraceToken = 
+					isIfBlock || isDoBlock || isTryBlock || isCatchBlock || isModuleBlock;
+				
+                if (isSingleLineEmptyBlock(node) ) {
+                    if (isNotNeedOpenCloseBraceToken || isForInBlock || isForOfBlock) { // for lua
+					}
+					else if (isForBlock || isWhileBlock) {
+						emitToken(SyntaxKind.OpenBraceToken, node.pos, ()=>{ write(" do"); } );
+					}
+					else {
+						emitToken(SyntaxKind.OpenBraceToken, node.pos); 
+					}
                     write(" ");
-                    emitToken(SyntaxKind.CloseBraceToken, node.statements.end);
+					if (isIfBlock || isDoBlock || isTryBlock || isCatchBlock) { // for lua
+					} 
+					else if (isAllForBlock || isWhileBlock) {
+						emitToken(SyntaxKind.CloseBraceToken, node.statements.end, ()=>{ write("end"); } );
+					}
+					else {
+						emitToken(SyntaxKind.CloseBraceToken, node.statements.end);
+					}
                     return;
                 }
-
-                emitToken(SyntaxKind.OpenBraceToken, node.pos);
+				
+				if (isNotNeedOpenCloseBraceToken || isForInBlock || isForOfBlock) { // for lua
+				} 
+				else if (isForBlock || isWhileBlock) {
+					emitToken(SyntaxKind.OpenBraceToken, node.statements.end, ()=>{ write(" do"); } );
+				}
+				else {
+					emitToken(SyntaxKind.OpenBraceToken, node.statements.end);
+				}
+				
                 increaseIndent();
                 scopeEmitStart(node.parent);
                 if (node.kind === SyntaxKind.ModuleBlock) {
                     Debug.assert(node.parent.kind === SyntaxKind.ModuleDeclaration);
                     emitCaptureThisForNodeIfNecessary(node.parent);
                 }
+				
+				if ( isAllForBlock || isWhileBlock || isDoBlock) {
+					writeLine();
+					write("do");
+					writeLine();
+				}
+				
                 emitLines(node.statements);
+				
                 if (node.kind === SyntaxKind.ModuleBlock) {
                     emitTempDeclarations(/*newLine*/ true);
                 }
+				
+				if ( isAllForBlock || isWhileBlock || isDoBlock) {
+	                writeLine();
+					write("end"); // inner do
+					writeLine();
+					// write("::continue::");
+					writeLine();
+					
+					if ( isForBlock && node.parent && (<ForStatement>(node.parent)).incrementor ) {
+						emitOptional("", (<ForStatement>(node.parent)).incrementor);
+						writeLine();
+					}
+				}
+				
                 decreaseIndent();
                 writeLine();
-                emitToken(SyntaxKind.CloseBraceToken, node.statements.end);
+                if (isNotNeedOpenCloseBraceToken) {
+				}
+				else if (isAllForBlock || isWhileBlock) {
+					emitToken(SyntaxKind.CloseBraceToken, node.statements.end, ()=>{ write("end"); } );
+				}
+				else {
+					emitToken(SyntaxKind.CloseBraceToken, node.statements.end);
+				}
                 scopeEmitEnd();
             }
 
@@ -2229,39 +2559,45 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 endPos = emitToken(SyntaxKind.OpenParenToken, endPos);
                 emit(node.expression);
                 emitToken(SyntaxKind.CloseParenToken, node.expression.end);
+				write(" then"); // for lua
                 emitEmbeddedStatement(node.thenStatement);
                 if (node.elseStatement) {
                     writeLine();
                     emitToken(SyntaxKind.ElseKeyword, node.thenStatement.end);
                     if (node.elseStatement.kind === SyntaxKind.IfStatement) {
-                        write(" ");
+                        // write(" "); // for lua
                         emit(node.elseStatement);
                     }
                     else {
                         emitEmbeddedStatement(node.elseStatement);
+						writeLine();// for lua
+						write("end"); // for lua
                     }
                 }
+				else {
+					writeLine();// for lua
+					write("end"); // for lua
+				}
             }
 
             function emitDoStatement(node: DoStatement) {
-                write("do");
+				lua_pushBlockType('do', writer);
+                write("repeat"); // for lua
                 emitEmbeddedStatement(node.statement);
-                if (node.statement.kind === SyntaxKind.Block) {
-                    write(" ");
-                }
-                else {
-                    writeLine();
-                }
-                write("while (");
+				writeLine();
+                write("until not (");
                 emit(node.expression);
-                write(");");
+				write(")");
+				lua_popBlockType(writer);
             }
 
             function emitWhileStatement(node: WhileStatement) {
+				lua_pushBlockType('while', writer);
                 write("while (");
                 emit(node.expression);
                 write(")");
-                emitEmbeddedStatement(node.statement);
+				emitEmbeddedStatement(node.statement);
+				lua_popBlockType(writer);
             }
 
             /**
@@ -2283,16 +2619,18 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     else if (isConst(decl)) {
                         tokenKind = SyntaxKind.ConstKeyword;
                     }
-                }
+                } 
 
                 if (startPos !== undefined) {
-                    emitToken(tokenKind, startPos);
-                    write(" ")
+					// [for lua] 
+                    //emitToken(tokenKind, startPos);
+                    //write(" ")
                 }
                 else {
                     switch (tokenKind) {
                         case SyntaxKind.VarKeyword:
-                            write("var ");
+                            //write("var ");  
+							write(lua_getVarDefineString() + " ");
                             break;
                         case SyntaxKind.LetKeyword:
                             write("let ");
@@ -2325,60 +2663,102 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 
                 return started;
             }
-
+			
             function emitForStatement(node: ForStatement) {
-                let endPos = emitToken(SyntaxKind.ForKeyword, node.pos);
-                write(" ");
-                endPos = emitToken(SyntaxKind.OpenParenToken, endPos);
+				lua_pushBlockType('for', writer);
+				let endPos = node.pos;
+				write("do");
+				writeLine();
                 if (node.initializer && node.initializer.kind === SyntaxKind.VariableDeclarationList) {
-                    let variableDeclarationList = <VariableDeclarationList>node.initializer;
+					let variableDeclarationList = <VariableDeclarationList>node.initializer;
                     let startIsEmitted = tryEmitStartOfVariableDeclarationList(variableDeclarationList, endPos);
-                    if (startIsEmitted) {
-                        emitCommaList(variableDeclarationList.declarations);
-                    }
-                    else {
-                        emitVariableDeclarationListSkippingUninitializedEntries(variableDeclarationList);
-                    }
+					let declarations = variableDeclarationList.declarations;
+					if (startIsEmitted) {
+						for ( let i=0; i<declarations.length; i++ ) {
+							write("local ");
+							emit(declarations[i]);
+							write(";");
+						}
+					}
+					else {
+						emitVariableDeclarationListSkippingUninitializedEntries(variableDeclarationList);
+						write(";");
+					}
                 }
                 else if (node.initializer) {
                     emit(node.initializer);
+					write(";");
                 }
-                write(";");
-                emitOptional(" ", node.condition);
-                write(";");
-                emitOptional(" ", node.incrementor);
-                write(")");
-                emitEmbeddedStatement(node.statement);
-            }
-
-            function emitForInOrForOfStatement(node: ForInStatement | ForOfStatement) {
-                if (languageVersion < ScriptTarget.ES6 && node.kind === SyntaxKind.ForOfStatement) {
-                    return emitDownLevelForOfStatement(node);
-                }
-
-                let endPos = emitToken(SyntaxKind.ForKeyword, node.pos);
+                
+				
+				writeLine();
+				endPos = emitToken(SyntaxKind.WhileKeyword, node.pos);
                 write(" ");
                 endPos = emitToken(SyntaxKind.OpenParenToken, endPos);
+                emitOptional(" ", node.condition);
+                write(")");
+				
+                emitEmbeddedStatement(node.statement);
+				
+				writeLine();
+				write("end");
+				lua_popBlockType(writer);
+            }
+			
+			function emitForInOrForOfStatement(node: ForInStatement | ForOfStatement) { // for lua
+				lua_pushBlockType('forin', writer);
+                //if (node.kind === SyntaxKind.ForOfStatement) {
+                    //let rt = emitDownLevelForOfStatement(node);
+					//lua_popBlockType(writer);
+					//return rt;
+                //}
+
+				let iterName:string = '';
+                let endPos = emitToken(SyntaxKind.ForKeyword, node.pos);
+                write(" ");
                 if (node.initializer.kind === SyntaxKind.VariableDeclarationList) {
                     let variableDeclarationList = <VariableDeclarationList>node.initializer;
                     if (variableDeclarationList.declarations.length >= 1) {
                         tryEmitStartOfVariableDeclarationList(variableDeclarationList, endPos);
-                        emit(variableDeclarationList.declarations[0]);
+						let dec:VariableDeclaration = variableDeclarationList.declarations[0];
+						if ( dec.name.kind === SyntaxKind.Identifier ) {
+							iterName = (<Identifier>dec.name).text;
+							if (node.kind === SyntaxKind.ForInStatement) {
+								write(iterName);
+								write(',_');
+							}
+							else {
+								write('_, ');
+								write(iterName);
+							}
+							
+						} 
                     }
                 }
                 else {
                     emit(node.initializer);
                 }
-
-                if (node.kind === SyntaxKind.ForInStatement) {
-                    write(" in ");
-                }
-                else {
-                    write(" of ");
-                }
-                emit(node.expression);
-                emitToken(SyntaxKind.CloseParenToken, node.expression.end);
+				 
+				if ( node.flags&NodeFlags.IsArray ) {
+					write(" in ipairs(");
+					emit(node.expression);
+					write(") do ");
+				}
+				else {
+					write(" in pairs(");
+					emit(node.expression);
+					write(") do ");
+				}
+				
+				if ( iterName != "" && (node.flags&NodeFlags.IsArray) && (node.kind === SyntaxKind.ForInStatement) ) {
+					write(iterName);
+					write(" = ");
+					write(iterName);
+					write(" - 1");
+				}
                 emitEmbeddedStatement(node.statement);
+
+				lua_popBlockType(writer);
             }
 
             function emitDownLevelForOfStatement(node: ForOfStatement) {
@@ -2423,7 +2803,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 // This is the let keyword for the counter and rhsReference. The let keyword for
                 // the LHS will be emitted inside the body.
                 emitStart(node.expression);
-                write("var ");
+                //write("var ");
+				write(lua_getVarDefineString() + " ");
                 
                 // _i = 0
                 emitNodeWithoutSourceMap(counter);
@@ -2470,7 +2851,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 let rhsIterationValue = createElementAccessExpression(rhsReference, counter);
                 emitStart(node.initializer);
                 if (node.initializer.kind === SyntaxKind.VariableDeclarationList) {
-                    write("var ");
+                    //write("var ");
+					write(lua_getVarDefineString() + " ");
                     let variableDeclarationList = <VariableDeclarationList>node.initializer;
                     if (variableDeclarationList.declarations.length > 0) {
                         let declaration = variableDeclarationList.declarations[0];
@@ -2523,34 +2905,66 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 decreaseIndent();
                 write("}");
             }
+			
+			function emitContinueStatement(node: BreakOrContinueStatement) { // for lua
+                emitToken(SyntaxKind.ContinueKeyword, node.pos, ()=>{write("goto continue"); });
+            }
 
             function emitBreakOrContinueStatement(node: BreakOrContinueStatement) {
-                emitToken(node.kind === SyntaxKind.BreakStatement ? SyntaxKind.BreakKeyword : SyntaxKind.ContinueKeyword, node.pos);
-                emitOptional(" ", node.label);
-                write(";");
+				if ( node.kind === SyntaxKind.BreakStatement && lua_isSwitchType() ) {
+					write('return __switch_return_break');
+				}
+				else { 
+					emitToken(node.kind === SyntaxKind.BreakStatement ? SyntaxKind.BreakKeyword : SyntaxKind.ContinueKeyword, node.pos);
+					emitOptional(" ", node.label);
+					write(";"); 
+				}
             }
 
             function emitReturnStatement(node: ReturnStatement) {
-                emitToken(SyntaxKind.ReturnKeyword, node.pos);
-                emitOptional(" ", node.expression);
-                write(";");
+				if ( lua_isSwitchType() ) { 
+					write('return __switch_return_return');
+					emitOptional(",", node.expression);
+				} 
+				else {
+					emitToken(SyntaxKind.ReturnKeyword, node.pos);
+					emitOptional(" ", node.expression);
+					write(";");
+				}
             }
 
-            function emitWithStatement(node: WhileStatement) {
+            function emitWithStatement(node: WithStatement) {
                 write("with (");
-                emit(node.expression);
+                emit(node.expression); 
                 write(")");
                 emitEmbeddedStatement(node.statement);
             }
 
             function emitSwitchStatement(node: SwitchStatement) {
-                let endPos = emitToken(SyntaxKind.SwitchKeyword, node.pos);
-                write(" ");
-                emitToken(SyntaxKind.OpenParenToken, endPos);
-                emit(node.expression);
-                endPos = emitToken(SyntaxKind.CloseParenToken, node.expression.end);
-                write(" ");
-                emitCaseBlock(node.caseBlock, endPos)
+				let isForLua = true;
+				if ( isForLua ) {
+					lua_pushBlockType('switch', writer);
+					let switchVarName = lua_getSwitchVarName();
+					write("local " + switchVarName + " = switch{");
+					lua_emitCaseBlock(writer, writeLine, increaseIndent, decreaseIndent, emitLines, emit, node.caseBlock);
+					write("}");
+					writeLine();
+					write("local __switch_rtflag, __switch_rt = " + switchVarName + ":case(");
+					emit(node.expression);
+					write(")");
+					writeLine();
+					write("if __switch_rtflag == __switch_return_return then return __switch_rt end");
+					lua_popBlockType(writer);
+				}
+				else {
+					let endPos = emitToken(SyntaxKind.SwitchKeyword, node.pos);
+					write(" ");
+					emitToken(SyntaxKind.OpenParenToken, endPos);
+					emit(node.expression);
+					endPos = emitToken(SyntaxKind.CloseParenToken, node.expression.end);
+					write(" ");
+					emitCaseBlock(node.caseBlock, endPos)
+				}
             }
 
             function emitCaseBlock(node: CaseBlock, startPos: number): void {
@@ -2599,31 +3013,41 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
             }
 
             function emitThrowStatement(node: ThrowStatement) {
-                write("throw ");
+                //write("throw ");
+                write("error ");
                 emit(node.expression);
                 write(";");
             }
 
             function emitTryStatement(node: TryStatement) {
-                write("try ");
+                //write("try ");
+                write("xpcall(function() -- try");
                 emit(node.tryBlock);
                 emit(node.catchClause);
+				write(")");
                 if (node.finallyBlock) {
                     writeLine();
-                    write("finally ");
+                    //write("finally ");
+					write("do -- finally");
                     emit(node.finallyBlock);
+					writeLine();
+					write("end");
                 }
             }
 
             function emitCatchClause(node: CatchClause) {
                 writeLine();
-                let endPos = emitToken(SyntaxKind.CatchKeyword, node.pos);
+                let endPos = emitToken(SyntaxKind.CatchKeyword, node.pos, ()=>{
+					write("end,function");
+					});
                 write(" ");
                 emitToken(SyntaxKind.OpenParenToken, endPos);
                 emit(node.variableDeclaration);
                 emitToken(SyntaxKind.CloseParenToken, node.variableDeclaration ? node.variableDeclaration.end : endPos);
-                write(" ");
+                write(" -- catch ");
                 emitBlock(node.block);
+				writeLine();
+				write("end");
             }
 
             function emitDebuggerStatement(node: Node) {
@@ -2658,7 +3082,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         write(".");
                     }
                     else if (languageVersion < ScriptTarget.ES6 && compilerOptions.module !== ModuleKind.System) {
-                        write("exports.");
+                        write("__exports.");
+						isHasExports = true;
                     }
                 }
                 emitNodeWithoutSourceMap(node.name);
@@ -3147,7 +3572,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 
             function emitParameter(node: ParameterDeclaration) {
                 if (languageVersion < ScriptTarget.ES6) {
-                    if (isBindingPattern(node.name)) {
+                    let nodeName = node.name;
+                    if (isBindingPattern(nodeName)) {
                         let name = createTempVariable(TempFlags.Auto);
                         if (!tempParameters) {
                             tempParameters = [];
@@ -3156,7 +3582,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         emit(name);
                     }
                     else {
-                        emit(node.name);
+                        emit(nodeName);
                     }
                 }
                 else {
@@ -3180,7 +3606,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 
                         if (isBindingPattern(p.name)) {
                             writeLine();
-                            write("var ");
+                            //write("var ");
+							write(lua_getVarDefineString() + " ");
                             emitDestructuring(p, /*isAssignmentExpressionStatement*/ false, tempParameters[tempIndex]);
                             write(";");
                             tempIndex++;
@@ -3190,15 +3617,15 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                             emitStart(p);
                             write("if (");
                             emitNodeWithoutSourceMap(p.name);
-                            write(" === void 0)");
+                            write(" == nil) then ");
                             emitEnd(p);
-                            write(" { ");
+                            //write(" { ");
                             emitStart(p);
                             emitNodeWithoutSourceMap(p.name);
                             write(" = ");
                             emitNodeWithoutSourceMap(p.initializer);
                             emitEnd(p);
-                            write("; }");
+                            write("; end");
                         }
                     });
                 }
@@ -3218,34 +3645,24 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     writeLine();
                     emitLeadingComments(restParam);
                     emitStart(restParam);
-                    write("var ");
+                    //write("var ");
+					write(lua_getVarDefineString() + " ");
                     emitNodeWithoutSourceMap(restParam.name);
-                    write(" = [];");
-                    emitEnd(restParam);
-                    emitTrailingComments(restParam);
-                    writeLine();
-                    write("for (");
-                    emitStart(restParam);
-                    write("var " + tempName + " = " + restIndex + ";");
-                    emitEnd(restParam);
-                    write(" ");
-                    emitStart(restParam);
-                    write(tempName + " < arguments.length;");
-                    emitEnd(restParam);
-                    write(" ");
-                    emitStart(restParam);
-                    write(tempName + "++");
-                    emitEnd(restParam);
-                    write(") {");
-                    increaseIndent();
-                    writeLine();
-                    emitStart(restParam);
-                    emitNodeWithoutSourceMap(restParam.name);
-                    write("[" + tempName + " - " + restIndex + "] = arguments[" + tempName + "];");
-                    emitEnd(restParam);
-                    decreaseIndent();
-                    writeLine();
-                    write("}");
+                    write(" = {...}");
+                    // write(" = __new(Array); local __restP = {...}");
+                    // emitEnd(restParam);
+                    // emitTrailingComments(restParam);
+                    // writeLine();
+                    // write("for _, p in ipairs(__restP) do");
+                    // increaseIndent();
+                    // writeLine();
+                    // emitStart(restParam);
+                    // emitNodeWithoutSourceMap(restParam.name);
+                    // write(":push(p)");
+                    // emitEnd(restParam);
+                    // decreaseIndent();
+                    // writeLine();
+                    // write("end");
                 }
             }
 
@@ -3309,7 +3726,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 if (shouldEmitFunctionName(node)) {
                     emitDeclarationName(node);
                 }
-
+				
                 emitSignatureAndBody(node);
                 if (languageVersion < ScriptTarget.ES6 && node.kind === SyntaxKind.FunctionDeclaration && node.parent === currentSourceFile && node.name) {
                     emitExportMemberAssignments((<FunctionDeclaration>node).name);
@@ -3323,7 +3740,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 if (resolver.getNodeCheckFlags(node) & NodeCheckFlags.CaptureThis) {
                     writeLine();
                     emitStart(node);
-                    write("var _this = this;");
+                    //for lua write("var _this = this;");
+					write(lua_getVarDefineString() + " " + "_this = this;");
                     emitEnd(node);
                 }
             }
@@ -3335,10 +3753,39 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     let parameters = node.parameters;
                     let omitCount = languageVersion < ScriptTarget.ES6 && hasRestParameters(node) ? 1 : 0;
                     emitList(parameters, 0, parameters.length - omitCount, /*multiLine*/ false, /*trailingComma*/ false);
+					if ( omitCount == 1 ) {
+						write(", ...");
+					}
                 }
                 write(")");
                 decreaseIndent();
             }
+			
+			function emitSignatureParametersWithSelf(node: FunctionLikeDeclaration) { // for lua
+                increaseIndent();
+                write("(this");
+                if (node) {
+                    let parameters = node.parameters;
+					if (parameters.length>0) write(", ");
+                    let omitCount = languageVersion < ScriptTarget.ES6 && hasRestParameters(node) ? 1 : 0;
+                    emitList(parameters, 0, parameters.length - omitCount, /*multiLine*/ false, /*trailingComma*/ false);
+					if ( omitCount == 1 ) {
+						if ( parameters.length>1) {
+							write(",");
+						}
+						write("...");
+					}
+                }
+                write(")");
+                decreaseIndent();
+            }
+			
+			function emitSignatureParametersWithSelfAndEllipsis(node: FunctionLikeDeclaration) { // for lua
+				increaseIndent();
+                write("(this, ...)");
+                decreaseIndent();
+			}
+			
 
             function emitSignatureParametersForArrow(node: FunctionLikeDeclaration) {
                 // Check whether the parameter list needs parentheses and preserve no-parenthesis
@@ -3348,6 +3795,13 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 }
                 emitSignatureParameters(node);
             }
+			
+			
+			function isClassCommonMember(node: FunctionLikeDeclaration) { // for lua
+				if (node.flags & NodeFlags.Static) return false;
+				if (!node.parent) return false;
+				return node.parent.kind === SyntaxKind.ClassDeclaration;
+			}
 
             function emitSignatureAndBody(node: FunctionLikeDeclaration) {
                 let saveTempFlags = tempFlags;
@@ -3363,13 +3817,20 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     write(" =>");
                 }
                 else {
-                    emitSignatureParameters(node);
+					if ( isClassCommonMember(node) ) { // for lua
+						emitSignatureParametersWithSelf(node); 
+					}
+					else {
+						emitSignatureParameters(node);
+					}
                 }
 
                 if (!node.body) {
                     // There can be no body when there are parse errors.  Just emit an empty block 
                     // in that case.
-                    write(" { }");
+					
+                    //write(" { }");  
+                    write(" end"); // for lua
                 }
                 else if (node.body.kind === SyntaxKind.Block) {
                     emitBlockFunctionBody(node, <Block>node.body);
@@ -3416,7 +3877,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
             }
 
             function emitDownLevelExpressionFunctionBody(node: FunctionLikeDeclaration, body: Expression) {
-                write(" {");
+                //write(" {");   // for lua
                 scopeEmitStart(node);
 
                 increaseIndent();
@@ -3453,14 +3914,15 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 }
 
                 emitStart(node.body);
-                write("}");
+                //write("}"); // for lua
+                write("end"); // for lua
                 emitEnd(node.body);
 
                 scopeEmitEnd();
             }
 
             function emitBlockFunctionBody(node: FunctionLikeDeclaration, body: Block) {
-                write(" {");
+                //write(" {");   for lua
                 scopeEmitStart(node);
 
                 let initialTextPos = writer.getTextPos();
@@ -3495,7 +3957,9 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     decreaseIndent();
                 }
 
-                emitToken(SyntaxKind.CloseBraceToken, body.statements.end);
+				emitToken(SyntaxKind.CloseBraceToken, body.statements.end, () => {
+                    write("end");
+                });
                 scopeEmitEnd();
             }
 
@@ -3591,8 +4055,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 emitEnd(property);
                 emitTrailingComments(property);
             }
-
-            function emitMemberFunctionsForES5AndLower(node: ClassLikeDeclaration) {
+			
+			function emitMemberFunctionsForES5AndLower_bak(node: ClassLikeDeclaration) {
                 forEach(node.members, member => {
                     if (member.kind === SyntaxKind.SemicolonClassElement) {
                         writeLine();
@@ -3666,6 +4130,92 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 });
             }
 
+            function emitMemberFunctionsForES5AndLower(node: ClassLikeDeclaration) { // for lua
+                forEach(node.members, member => {
+                    if (member.kind === SyntaxKind.SemicolonClassElement) {
+                        writeLine();
+                        write(";");
+                    }
+                    else if (member.kind === SyntaxKind.MethodDeclaration || node.kind === SyntaxKind.MethodSignature) {
+                        if (!(<MethodDeclaration>member).body) {
+                            return emitOnlyPinnedOrTripleSlashComments(member);
+                        }
+
+                        writeLine();
+                        emitLeadingComments(member);
+                        emitStart(member);
+                        emitStart((<MethodDeclaration>member).name);
+						
+						//emitClassMemberPrefix(node, member);
+						emitDeclarationName(node); // for lua
+						
+                        emitMemberAccessForPropertyName((<MethodDeclaration>member).name);
+                        emitEnd((<MethodDeclaration>member).name);
+                        write(" = ");
+                        emitStart(member);
+                        emitFunctionDeclaration(<MethodDeclaration>member);
+                        emitEnd(member);
+                        emitEnd(member);
+                        write(";");
+                        emitTrailingComments(member);
+                    }
+                    else if (member.kind === SyntaxKind.GetAccessor || member.kind === SyntaxKind.SetAccessor) {
+                        let accessors = getAllAccessorDeclarations(node.members, <AccessorDeclaration>member);
+                        if (member === accessors.firstAccessor) {
+                            writeLine();
+                            emitStart(member);
+							write('__add_attrs_getters_setters(');
+							emitDeclarationName(node);
+							write(')');
+							if (accessors.getAccessor) {
+								writeLine();
+								emitLeadingComments(accessors.getAccessor);
+								emitDeclarationName(node);
+								write('.__getters.');
+								let name = (<AccessorDeclaration>member).name;
+								if ( name != null && name.kind === SyntaxKind.Identifier ) {
+									write((<Identifier>name).text);
+								}
+								emitStart(accessors.getAccessor);
+								write(" = function ");
+								emitSignatureAndBody(accessors.getAccessor);
+                                emitEnd(accessors.getAccessor);
+                                emitTrailingComments(accessors.getAccessor);
+								write(";");
+							}
+							
+							writeLine();
+							if (accessors.setAccessor) {
+								emitLeadingComments(accessors.setAccessor);
+							}
+							emitDeclarationName(node);
+							write('.__setters.');
+							let name = (<AccessorDeclaration>member).name;
+							if ( name != null && name.kind === SyntaxKind.Identifier ) {
+								write((<Identifier>name).text);
+							}
+							if (accessors.setAccessor) {
+								emitStart(accessors.setAccessor);
+							}
+							write(" = function ");
+							if (accessors.setAccessor) {
+								emitSignatureAndBody(accessors.setAccessor);
+								emitEnd(accessors.setAccessor);
+								emitTrailingComments(accessors.setAccessor);
+							}
+							else {
+								write("(this, value)");
+								writeLine();
+								write("end");
+							}
+							write(";");
+                            writeLine();
+                            emitEnd(member);
+                        }
+                    }
+                });
+            }
+
             function emitMemberFunctionsForES6AndHigher(node: ClassLikeDeclaration) {
                 for (let member of node.members) {
                     if ((member.kind === SyntaxKind.MethodDeclaration || node.kind === SyntaxKind.MethodSignature) && !(<MethodDeclaration>member).body) {
@@ -3701,6 +4251,13 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     }
                 }
             }
+			
+			function emitSubTable(node: ClassLikeDeclaration, baseTypeElement: ExpressionWithTypeArguments) {
+				writeLine();
+				write("local ");
+				emitDeclarationName(node);
+				write(" = {}");
+			}
 
             function emitConstructor(node: ClassLikeDeclaration, baseTypeElement: ExpressionWithTypeArguments) {
                 let saveTempFlags = tempFlags;
@@ -3716,8 +4273,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 tempVariables = saveTempVariables;
                 tempParameters = saveTempParameters;
             }
-
-            function emitConstructorWorker(node: ClassLikeDeclaration, baseTypeElement: ExpressionWithTypeArguments) {
+			
+			function emitConstructorWorker_bak(node: ClassLikeDeclaration, baseTypeElement: ExpressionWithTypeArguments) {
                 // Check if we have property assignment inside class declaration.
                 // If there is property assignment, we need to emit constructor whether users define it or not
                 // If there is no property assignment, we can omit constructor if users do not define it
@@ -3820,6 +4377,103 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 }
                 decreaseIndent();
                 emitToken(SyntaxKind.CloseBraceToken, ctor ? (<Block>ctor.body).statements.end : node.members.end);
+                scopeEmitEnd();
+                emitEnd(<Node>ctor || node);
+                if (ctor) {
+                    emitTrailingComments(ctor);
+                }
+            }
+
+            function emitConstructorWorker(node: ClassLikeDeclaration, baseTypeElement: ExpressionWithTypeArguments) { // for lua
+                // Check if we have property assignment inside class declaration.
+                // If there is property assignment, we need to emit constructor whether users define it or not
+                // If there is no property assignment, we can omit constructor if users do not define it
+                let hasInstancePropertyWithInitializer = false;
+                let hasConstructor = false;
+
+                // Emit the constructor overload pinned comments
+                forEach(node.members, member => {
+                    if (member.kind === SyntaxKind.Constructor && !(<ConstructorDeclaration>member).body) {
+                        emitOnlyPinnedOrTripleSlashComments(member);
+                    }
+                    // Check if there is any non-static property assignment
+                    if (member.kind === SyntaxKind.PropertyDeclaration && (<PropertyDeclaration>member).initializer && (member.flags & NodeFlags.Default) === 0) {
+                        hasInstancePropertyWithInitializer = true;
+                    }
+					if (member.kind === SyntaxKind.Constructor) {
+                        hasConstructor = true;
+                    }
+                });
+				
+                let ctor = getFirstConstructorWithBody(node);
+
+                // For target ES6 and above, if there is no user-defined constructor and there is no property assignment
+                // do not emit constructor in class declaration.
+                if (languageVersion >= ScriptTarget.ES6 && !ctor && !hasInstancePropertyWithInitializer) {
+                    return;
+                }
+
+                if (ctor) {
+                    emitLeadingComments(ctor);
+                }
+                emitStart(ctor || node);
+
+				writeLine();
+				emitDeclarationName(node);
+				write(".constructor = function ");
+				
+				var isBaseTypeNode = baseTypeElement ? false:true;
+				if (isBaseTypeNode || hasConstructor) {
+					emitSignatureParametersWithSelf(ctor);
+				}
+				else {
+					emitSignatureParametersWithSelfAndEllipsis(ctor);
+				}
+				writeLine();
+				increaseIndent();
+				if (ctor) {
+					emitDetachedComments(ctor.body.statements);
+				}
+				
+		        emitCaptureThisForNodeIfNecessary(node);
+                if (ctor) {
+                    emitDefaultValueAssignments(ctor);
+                    emitRestParameter(ctor);
+                    if (baseTypeElement) {
+                        var superCall = findInitialSuperCall(ctor);
+                        if (superCall) {
+                            writeLine();
+                            emit(superCall);
+                        }
+                    }
+                    emitParameterPropertyAssignments(ctor);
+                }
+                else {
+                    if (baseTypeElement) {
+                        writeLine();
+                        emitStart(baseTypeElement);
+                        write("_super.constructor(this, ...);");
+                        emitEnd(baseTypeElement);
+                    }
+                }
+                emitPropertyDeclarations(node, getInitializedProperties(node, /*static:*/ false));
+                if (ctor) {
+                    var statements: Node[] = (<Block>ctor.body).statements;
+                    if (superCall) {
+                        statements = statements.slice(1);
+                    }
+                    emitLines(statements);
+                }
+                emitTempDeclarations(/*newLine*/ true);
+                writeLine();
+                if (ctor) {
+                    emitLeadingCommentsOfPosition((<Block>ctor.body).statements.end);
+                }
+                decreaseIndent();
+				writeLine();
+				emitToken(SyntaxKind.CloseBraceToken, ctor ? (<Block>ctor.body).statements.end : node.members.end, ()=>{
+					write("end;");
+				});
                 scopeEmitEnd();
                 emitEnd(<Node>ctor || node);
                 if (ctor) {
@@ -4025,7 +4679,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 if (node.kind === SyntaxKind.ClassDeclaration) {
                     // source file level classes in system modules are hoisted so 'var's for them are already defined
                     if (!shouldHoistDeclarationInSystemJsModule(node)) {
-                        write("var ");
+						write(lua_getVarDefineString() + " "); //write("var ");
                     }
                     emitDeclarationName(node);
                     write(" = ");
@@ -4036,7 +4690,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 if (baseTypeNode) {
                     write("_super");
                 }
-                write(") {");
+                write(") ");  //for lua   write(") {");
                 let saveTempFlags = tempFlags;
                 let saveTempVariables = tempVariables;
                 let saveTempParameters = tempParameters;
@@ -4047,6 +4701,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 computedPropertyNamesToGeneratedNames = undefined;
                 increaseIndent();
                 scopeEmitStart(node);
+				emitSubTable(node, baseTypeNode); // for lua
                 if (baseTypeNode) {
                     writeLine();
                     emitStart(baseTypeNode);
@@ -4074,7 +4729,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 computedPropertyNamesToGeneratedNames = saveComputedPropertyNamesToGeneratedNames;
                 decreaseIndent();
                 writeLine();
-                emitToken(SyntaxKind.CloseBraceToken, node.members.end);
+                write("end"); //for lua  emitToken(SyntaxKind.CloseBraceToken, node.members.end);
                 scopeEmitEnd();
                 emitStart(node);
                 write(")(");
@@ -4438,7 +5093,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 if (!shouldEmitEnumDeclaration(node)) {
                     return;
                 }
-
+				
                 if (!shouldHoistDeclarationInSystemJsModule(node)) {
                     // do not emit var if variable was already hoisted
                     if (!(node.flags & NodeFlags.Export) || isES6ExportedDeclaration(node)) {
@@ -4446,37 +5101,48 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         if (isES6ExportedDeclaration(node)) {
                             write("export ");
                         }
-                        write("var ");
+                        //write("var ");
+						write(lua_getVarDefineString() + " ");
                         emit(node.name);
                         emitEnd(node);
                         write(";");
                     }
                 }
                 writeLine();
+				emitModuleMemberName(node);
+				write(' = ');
+				emitModuleMemberName(node);
+				write(' or {}');
+				writeLine();
                 emitStart(node);
                 write("(function (");
                 emitStart(node.name);
                 write(getGeneratedNameForNode(node));
                 emitEnd(node.name);
-                write(") {");
+                //write(") {");
+                write(")");
                 increaseIndent();
                 scopeEmitStart(node);
                 emitLines(node.members);
                 decreaseIndent();
                 writeLine();
-                emitToken(SyntaxKind.CloseBraceToken, node.members.end);
+                emitToken(SyntaxKind.CloseBraceToken, node.members.end, ()=>{
+					write('end');
+				});
                 scopeEmitEnd();
                 write(")(");
                 emitModuleMemberName(node);
-                write(" || (");
-                emitModuleMemberName(node);
-                write(" = {}));");
+                //write(" || (");
+                //emitModuleMemberName(node);
+                //write(" = {}));");
+                write(")");
                 emitEnd(node);
                 if (!isES6ExportedDeclaration(node) && node.flags & NodeFlags.Export && !shouldHoistDeclarationInSystemJsModule(node)) {
                     // do not emit var if variable was already hoisted
                     writeLine();
                     emitStart(node);
-                    write("var ");
+                    //write("var ");
+					write(lua_getVarDefineString() + " ");
                     emit(node.name);
                     write(" = ");
                     emitModuleMemberName(node);
@@ -4502,13 +5168,15 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 emitStart(node);
                 write(getGeneratedNameForNode(enumParent));
                 write("[");
+                writeEnumMemberDeclarationValue(node);
+                write("] = ");
+                emitExpressionForPropertyName(node.name);
+				write(";");
                 write(getGeneratedNameForNode(enumParent));
                 write("[");
                 emitExpressionForPropertyName(node.name);
                 write("] = ");
                 writeEnumMemberDeclarationValue(node);
-                write("] = ");
-                emitExpressionForPropertyName(node.name);
                 emitEnd(node);
                 write(";");
             }
@@ -4557,9 +5225,19 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     if (isES6ExportedDeclaration(node)) {
                         write("export ");
                     }
-                    write("var ");
-                    emit(node.name);
-                    write(";");
+					if ((node.flags & NodeFlags.Export) && !isES6ExportedDeclaration(node)) {
+						emitModuleMemberName(node);
+						write("=");
+						emitModuleMemberName(node);
+						write(" or {};");
+					}
+					else {
+						write(lua_getVarDefineString() + " ");
+						emit(node.name);
+						write("=");
+						emit(node.name);
+						write(" or {};");
+					}
                     emitEnd(node);
                     writeLine();
                 }
@@ -4577,12 +5255,14 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     tempVariables = undefined;
 
                     emit(node.body);
+					writeLine();
+					write('end');
 
                     tempFlags = saveTempFlags;
                     tempVariables = saveTempVariables;
                 }
                 else {
-                    write("{");
+                    //write("{");
                     increaseIndent();
                     scopeEmitStart(node);
                     emitCaptureThisForNodeIfNecessary(node);
@@ -4591,19 +5271,19 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     decreaseIndent();
                     writeLine();
                     let moduleBlock = <ModuleBlock>getInnerMostModuleDeclarationFromDottedModule(node).body;
-                    emitToken(SyntaxKind.CloseBraceToken, moduleBlock.statements.end);
+                    emitToken(SyntaxKind.CloseBraceToken, moduleBlock.statements.end, ()=>{
+						write('end');
+					});
                     scopeEmitEnd();
                 }
                 write(")(");
                 // write moduleDecl = containingModule.m only if it is not exported es6 module member
                 if ((node.flags & NodeFlags.Export) && !isES6ExportedDeclaration(node)) {
-                    emit(node.name);
-                    write(" = ");
+                    //emit(node.name);
+                    //write(" = ");
                 }
                 emitModuleMemberName(node);
-                write(" || (");
-                emitModuleMemberName(node);
-                write(" = {}));");
+                write(");");
                 emitEnd(node);
                 if (!isES6ExportedDeclaration(node) && node.name.kind === SyntaxKind.Identifier && node.parent === currentSourceFile) {
                     if (compilerOptions.module === ModuleKind.System && (node.flags & NodeFlags.Export)) {
@@ -4710,7 +5390,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         if (namespaceDeclaration && !isDefaultImport(node)) {
                             // import x = require("foo")
                             // import * as x from "foo"
-                            if (!isExportedImport) write("var ");
+                            //if (!isExportedImport) write("var ");
+                            if (!isExportedImport) write(lua_getVarDefineString() + " ");
                             emitModuleMemberName(namespaceDeclaration);
                             write(" = ");
                         }
@@ -4722,7 +5403,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                             // import d, { x, y } from "foo"
                             let isNakedImport = SyntaxKind.ImportDeclaration && !(<ImportDeclaration>node).importClause;
                             if (!isNakedImport) {
-                                write("var ");
+                                //write("var ");
+								write(lua_getVarDefineString() + " ");
                                 write(getGeneratedNameForNode(<ImportDeclaration>node));
                                 write(" = ");
                             }
@@ -4735,7 +5417,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                             write(" = ");
                             write(getGeneratedNameForNode(<ImportDeclaration>node));
                         }
-                        write(";");
+                        //write(";");
                         emitEnd(node);
                         emitExportImportAssignments(node);
                         emitTrailingComments(node);
@@ -4749,7 +5431,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         }
                         else if (namespaceDeclaration && isDefaultImport(node)) {
                             // import d, * as x from "foo"
-                            write("var ");
+                            //write("var ");
+							write(lua_getVarDefineString() + " ");
                             emitModuleMemberName(namespaceDeclaration);
                             write(" = ");
                             write(getGeneratedNameForNode(<ImportDeclaration>node));
@@ -4774,10 +5457,12 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     emitStart(node);
                     if (isES6ExportedDeclaration(node)) {
                         write("export ");
-                        write("var ");
+                        //write("var ");
+						write(lua_getVarDefineString() + " ");
                     }
                     else if (!(node.flags & NodeFlags.Export)) {
-                        write("var ");
+                        //write("var ");
+						write(lua_getVarDefineString() + " ");
                     }
                     emitModuleMemberName(node);
                     write(" = ");
@@ -4799,7 +5484,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                         if (node.exportClause) {
                             // export { x, y, ... } from "foo"
                             if (compilerOptions.module !== ModuleKind.AMD) {
-                                write("var ");
+                                //write("var ");
+								write(lua_getVarDefineString() + " ");
                                 write(generatedName);
                                 write(" = ");
                                 emitRequire(getExternalModuleName(node));
@@ -5020,7 +5706,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     }
 
                     if (!started) {
-                        write("var ");
+                        //write("var ");
+						write(lua_getVarDefineString() + " ");
                         started = true;
                     }
                     else {
@@ -5181,7 +5868,8 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 
                 if (hoistedVars) {
                     writeLine();
-                    write("var ");
+                    //write("var ");
+					write(lua_getVarDefineString() + " ");
                     let seen: Map<string> = {};
                     for (let i = 0; i < hoistedVars.length; ++i) {
                         let local = hoistedVars[i];
@@ -5592,7 +6280,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     }
                 }
 
-                write("[\"require\", \"exports\"");
+                write("{\"require\", \"exports\"");
                 if (aliasedModuleNames.length) {
                     write(", ");
                     write(aliasedModuleNames.join(", "));
@@ -5601,7 +6289,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     write(", ");
                     write(unaliasedModuleNames.join(", "));
                 }
-                write("], function (require, exports");
+                write("}, function (require, exports");
                 if (importAliasNames.length) {
                     write(", ");
                     write(importAliasNames.join(", "));
@@ -5612,12 +6300,12 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 collectExternalModuleInfo(node);
 
                 writeLine();
-                write("define(");
-                if (node.amdModuleName) {
-                    write("\"" + node.amdModuleName + "\", ");
-                }
+                write("local _addonName, _addon = ...");
+                writeLine();
+                write("define(_addonName, _addon, ");
+                write("\"" + node.fileName.replace(/\.ts$/, '') + "\", ");
                 emitAMDDependencies(node, /*includeNonAmdDependencies*/ true);
-                write(") {");
+                write(") ");
                 increaseIndent();
                 emitExportStarHelper();
                 emitCaptureThisForNodeIfNecessary(node);
@@ -5626,7 +6314,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 emitExportEquals(/*emitAsReturn*/ true);
                 decreaseIndent();
                 writeLine();
-                write("});");
+                write("end);");
             }
 
             function emitCommonJSModule(node: SourceFile, startIndex: number) {
@@ -5679,10 +6367,12 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 if (exportEquals && resolver.isValueAliasDeclaration(exportEquals)) {
                     writeLine();
                     emitStart(exportEquals);
-                    write(emitAsReturn ? "return " : "module.exports = ");
-                    emit((<ExportAssignment>exportEquals).expression);
+                    //write(emitAsReturn ? "return " : "module.exports = ");
+					write("__export = ");
+					emit((<ExportAssignment>exportEquals).expression);
                     write(";");
                     emitEnd(exportEquals);
+					isHasExport = true;
                 }
             }
 
@@ -5714,19 +6404,22 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
             }
 
             function emitSourceFileNode(node: SourceFile) {
+				isHasExports = false;
+				isHasExport = false;
                 // Start new file on new line
                 writeLine();
                 emitDetachedComments(node);
 
                 // emit prologue directives prior to __extends
                 var startIndex = emitDirectivePrologues(node.statements, /*startWithNewLine*/ false);
+				// writeLines(extendsHelper);
 
                 // Only emit helpers if the user did not say otherwise.
                 if (!compilerOptions.noEmitHelpers) {
                     // Only Emit __extends function when target ES5.
                     // For target ES6 and above, we can emit classDeclaration as is.
                     if ((languageVersion < ScriptTarget.ES6) && (!extendsEmitted && resolver.getNodeCheckFlags(node) & NodeCheckFlags.EmitExtends)) {
-                        writeLines(extendsHelper);
+                        //writeLines(extendsHelper);
                         extendsEmitted = true;
                     }
 
@@ -5772,6 +6465,14 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                 }
 
                 emitLeadingComments(node.endOfFileToken);
+				if (isHasExports){
+					writeLine();
+					write('return __exports;');
+				}
+				else if ( isHasExport ) {
+					writeLine();
+					write('return __export;');
+				}
             }
 
             function emitNodeWithoutSourceMap(node: Node, allowGeneratedIdentifiers?: boolean): void {
@@ -5856,7 +6557,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     case SyntaxKind.SuperKeyword:
                         return emitSuper(node);
                     case SyntaxKind.NullKeyword:
-                        return write("null");
+                        return write("nil");
                     case SyntaxKind.TrueKeyword:
                         return write("true");
                     case SyntaxKind.FalseKeyword:
@@ -5950,6 +6651,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
                     case SyntaxKind.ForInStatement:
                         return emitForInOrForOfStatement(<ForInStatement>node);
                     case SyntaxKind.ContinueStatement:
+						return emitContinueStatement(<BreakOrContinueStatement>node); // for lua
                     case SyntaxKind.BreakStatement:
                         return emitBreakOrContinueStatement(<BreakOrContinueStatement>node);
                     case SyntaxKind.ReturnStatement:
@@ -6160,7 +6862,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
         }
 
         function emitFile(jsFilePath: string, sourceFile?: SourceFile) {
-            emitJavaScript(jsFilePath, sourceFile);
+            emitJavaScript(jsFilePath, sourceFile); 
 
             if (compilerOptions.declaration) {
                 writeDeclarationFile(jsFilePath, sourceFile, host, resolver, diagnostics);

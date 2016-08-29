@@ -20,7 +20,7 @@ module ts {
 
         return symbol.id;
     }
-
+	
     export function createTypeChecker(host: TypeCheckerHost, produceDiagnostics: boolean): TypeChecker {
         let Symbol = objectAllocator.getSymbolConstructor();
         let Type = objectAllocator.getTypeConstructor();
@@ -3866,6 +3866,18 @@ module ts {
         }
 
         function instantiateAnonymousType(type: ObjectType, mapper: TypeMapper): ObjectType {
+            // If this type has already been instantiated using this mapper, returned the cached result. This guards against
+            // infinite instantiations of cyclic types, e.g. "var x: { a: T, b: typeof x };"
+            if (mapper.mappings) {
+                let cached = <ObjectType>mapper.mappings[type.id];
+                if (cached) {
+                    return cached;
+                }
+            }
+            else {
+                mapper.mappings = {};
+            }
+            // Instantiate the given type using the given mapper and cache the result
             let result = <ResolvedType>createObjectType(TypeFlags.Anonymous, type.symbol);
             result.properties = instantiateList(getPropertiesOfObjectType(type), mapper, instantiateSymbol);
             result.members = createSymbolTable(result.properties);
@@ -3875,6 +3887,7 @@ module ts {
             let numberIndexType = getIndexTypeOfType(type, IndexKind.Number);
             if (stringIndexType) result.stringIndexType = instantiateType(stringIndexType, mapper);
             if (numberIndexType) result.numberIndexType = instantiateType(numberIndexType, mapper);
+            mapper.mappings[type.id] = result;
             return result;
         }
 
@@ -3976,7 +3989,13 @@ module ts {
         }
 
         function checkTypeAssignableTo(source: Type, target: Type, errorNode: Node, headMessage?: DiagnosticMessage): boolean {
-            return checkTypeRelatedTo(source, target, assignableRelation, errorNode, headMessage);
+            let ret = checkTypeRelatedTo(source, target, assignableRelation, errorNode, headMessage);
+			if ( ret ) {
+				if ( isArrayTypeEx(source) ) { // for lua
+					target.flags |= TypeFlags.IsArray;
+				}
+			}
+			return ret;
         }
 
         function isSignatureAssignableTo(source: Signature, target: Signature): boolean {
@@ -4003,7 +4022,7 @@ module ts {
             let elaborateErrors = false;
 
             Debug.assert(relation !== identityRelation || !errorNode, "no error reporting in identity checking");
-
+				
             let result = isRelatedTo(source, target, errorNode !== undefined, headMessage);
             if (overflow) {
                 error(errorNode, Diagnostics.Excessive_stack_depth_comparing_types_0_and_1, typeToString(source), typeToString(target));
@@ -4709,7 +4728,8 @@ module ts {
         }
 
         function isArrayType(type: Type): boolean {
-            return type.flags & TypeFlags.Reference && (<TypeReference>type).target === globalArrayType;
+            return (type.flags & TypeFlags.Reference && (<TypeReference>type).target === globalArrayType) 
+				|| ((type.flags & TypeFlags.IsArray) === TypeFlags.IsArray);
         }
 
         function isArrayLikeType(type: Type): boolean {
@@ -4728,6 +4748,51 @@ module ts {
         function isTupleType(type: Type): boolean {
             return (type.flags & TypeFlags.Tuple) && !!(<TupleType>type).elementTypes;
         }
+		
+		function isInnerArrayInterface(type: Type):boolean{
+			if ( type.flags&TypeFlags.Interface ) {
+				if ( type.symbol && 
+					(type.symbol.name === 'TemplateStringsArray'
+					|| type.symbol.name === 'RegExpMatchArray'
+					|| type.symbol.name === 'RegExpExecArray' ) )
+				return true;
+			}
+			return false;
+		}
+		
+		function isInnerObjectInterface(type: Type):boolean{
+			if ( isArrayType(type) || isInnerArrayInterface(type)) {
+				return true;
+			}
+			
+			if ( type.flags&TypeFlags.Interface ) {
+				//if ( type.symbol && 
+				//	(type.symbol.name === 'RegExp') )
+				return true;
+			}
+			return false;
+		}
+		
+		function isArrayTypeEx(type: Type): boolean {
+			return isArrayType(type) || isTupleType(type) || isInnerArrayInterface(type); 
+		}
+		
+		function isStringObject(type: Type): boolean {
+			if ( type.flags&TypeFlags.Interface ) {
+				if ( type.symbol && (type.symbol.name === 'String') )
+				return true;
+			}
+			return false;
+		}
+		
+		function isStringType(type: Type): boolean {
+			if (type.flags&TypeFlags.StringLike) return true;
+			return false;
+		}
+		
+		function isStringTypeEx(type: Type): boolean {
+			return isStringType(type) || isStringObject(type);
+		}
 
         function getWidenedTypeOfObjectLiteral(type: Type): Type {
             let properties = getPropertiesOfObjectType(type);
@@ -6084,6 +6149,10 @@ module ts {
             let arrayOrIterableType = checkExpressionCached(node.expression, contextualMapper);
             return checkIteratedTypeOrElementType(arrayOrIterableType, node.expression, /*allowStringInput*/ false);
         }
+		
+		function checkRegularLiteral(node: LiteralExpression): Type{ // for lua
+			return globalRegExpType;
+		}
 
         function checkArrayLiteral(node: ArrayLiteralExpression, contextualMapper?: TypeMapper): Type {
             let elements = node.elements;
@@ -6350,10 +6419,50 @@ module ts {
                     if (left.kind === SyntaxKind.SuperKeyword && getDeclarationKindFromSymbol(prop) !== SyntaxKind.MethodDeclaration) {
                         error(right, Diagnostics.Only_public_and_protected_methods_of_the_base_class_are_accessible_via_the_super_keyword);
                     }
-                    else {
+                    else { 
                         checkClassPropertyAccess(node, left, type, prop);
                     }
+					
+					//add by qjb for lua emitter
+					if (type.flags & TypeFlags.Class) {
+						node.flags = node.flags | NodeFlags.ParentIsClassObject;
+					}
                 }
+				
+				if (isInnerObjectInterface(type)){
+					node.flags = node.flags | NodeFlags.ParentIsClassObject;
+				}
+				
+				if (isStringTypeEx(type)) {
+					node.flags = node.flags | NodeFlags.IsString;
+					node.flags = node.flags | NodeFlags.ParentIsClassObject;
+					if ( node.parent && node.parent.kind === SyntaxKind.BinaryExpression) {
+						let p_node = (<BinaryExpression>node.parent);
+						let parent_left = p_node.left;
+						if( parent_left.kind === SyntaxKind.PropertyAccessExpression 
+							&& parent_left.kind === node.kind
+							&& <PropertyAccessExpression>parent_left === <PropertyAccessExpression>node ) {
+							let name:string = (<PropertyAccessExpression>node).name.text;
+							if ( name === 'length' && (
+								p_node.operatorToken.kind ===  SyntaxKind.PlusEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.MinusEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.AsteriskEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.SlashEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.PercentEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.PercentEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.EqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.LessThanLessThanEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.GreaterThanGreaterThanEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.AmpersandEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.BarEqualsToken
+								|| p_node.operatorToken.kind ===  SyntaxKind.CaretEqualsToken ) ) {
+								error(right, Diagnostics.string_length_is_readonly);
+							}
+						}
+					}
+				}
+					
                 return getTypeOfSymbol(prop);
             }
             return anyType;
@@ -6400,10 +6509,18 @@ module ts {
             // Obtain base constraint such that we can bail out if the constraint is an unknown type
             let objectType = getApparentType(checkExpression(node.expression));
             let indexType = node.argumentExpression ? checkExpression(node.argumentExpression) : unknownType;
-
+			
             if (objectType === unknownType) {
                 return unknownType;
             }
+			
+			// for lua
+			if ( isArrayTypeEx(objectType)) {
+				node.flags = node.flags | NodeFlags.IsArray;
+			}
+			if ( isStringTypeEx(objectType) ) {
+				node.flags = node.flags | NodeFlags.IsString;
+			}
 
             let isConstEnum = isConstEnumObjectType(objectType);
             if (isConstEnum &&
@@ -7857,9 +7974,11 @@ module ts {
                         resultType = numberType;
                     }
                     else {
-                        if (allConstituentTypesHaveKind(leftType, TypeFlags.StringLike) || allConstituentTypesHaveKind(rightType, TypeFlags.StringLike)) {
+                        if (allConstituentTypesHaveKind(leftType, TypeFlags.StringLike) || allConstituentTypesHaveKind(rightType, TypeFlags.StringLike)
+							|| isStringTypeEx(leftType) || isStringTypeEx(rightType) ) {
                             // If one or both operands are of the String primitive type, the result is of the String primitive type.
                             resultType = stringType;
+							node.flags = node.flags | NodeFlags.IsString;
                         }
                         else if (leftType.flags & TypeFlags.Any || rightType.flags & TypeFlags.Any) {
                             // Otherwise, the result is of type Any.
@@ -8120,7 +8239,7 @@ module ts {
                 case SyntaxKind.NoSubstitutionTemplateLiteral:
                     return stringType;
                 case SyntaxKind.RegularExpressionLiteral:
-                    return globalRegExpType;
+					return checkRegularLiteral(<LiteralExpression>node);
                 case SyntaxKind.ArrayLiteralExpression:
                     return checkArrayLiteral(<ArrayLiteralExpression>node, contextualMapper);
                 case SyntaxKind.ObjectLiteralExpression:
@@ -9486,6 +9605,12 @@ module ts {
             let rightType = checkExpression(node.expression);
             // unknownType is returned i.e. if node.expression is identifier whose name cannot be resolved
             // in this case error about missing name is already reported - do not report extra one
+
+			let prightType = getApparentType(rightType);
+			if ( isArrayTypeEx(prightType)) {
+				node.flags = node.flags | NodeFlags.IsArray;
+			}
+			
             if (!allConstituentTypesHaveKind(rightType, TypeFlags.Any | TypeFlags.ObjectType | TypeFlags.TypeParameter)) {
                 error(node.expression, Diagnostics.The_right_hand_side_of_a_for_in_statement_must_be_of_type_any_an_object_type_or_a_type_parameter);
             }
@@ -10914,6 +11039,7 @@ module ts {
                     break;
                 case SyntaxKind.MethodDeclaration:
                 case SyntaxKind.MethodSignature:
+                    forEach(node.decorators, checkFunctionExpressionBodies);
                     forEach((<MethodDeclaration>node).parameters, checkFunctionExpressionBodies);
                     if (isObjectLiteralMethod(node)) {
                         checkFunctionExpressionOrObjectLiteralMethodBody(<MethodDeclaration>node);
@@ -10928,6 +11054,7 @@ module ts {
                 case SyntaxKind.WithStatement:
                     checkFunctionExpressionBodies((<WithStatement>node).expression);
                     break;
+                case SyntaxKind.Decorator:
                 case SyntaxKind.Parameter:
                 case SyntaxKind.PropertyDeclaration:
                 case SyntaxKind.PropertySignature:
@@ -12731,7 +12858,8 @@ module ts {
 
         function checkGrammarAccessor(accessor: MethodDeclaration): boolean {
             let kind = accessor.kind;
-            if (languageVersion < ScriptTarget.ES5) {
+			let isLua = true;
+            if (languageVersion < ScriptTarget.ES5 && !isLua) {
                 return grammarErrorOnNode(accessor.name, Diagnostics.Accessors_are_only_available_when_targeting_ECMAScript_5_and_higher);
             }
             else if (isInAmbientContext(accessor)) {

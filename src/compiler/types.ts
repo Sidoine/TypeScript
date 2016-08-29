@@ -316,6 +316,12 @@ module ts {
         OctalLiteral =      0x00004000,  // Octal numeric literal
         Namespace =         0x00008000,  // Namespace declaration
         ExportContext =     0x00010000,  // Export context (initialized by binding)
+		
+		ParentIsClassObject = 0x00100000, //add by qjb for lua
+		IsClassObjectMethodCall = 0x00200000, //add by qjb for lua
+		IsArray = 0x00400000, //add by qjb for lua
+		IsString = 0x00800000, //add by qjb for lua
+		IngoreClassObjectMethodCall = 0x01000000, //add by qjb for lua
 
         Modifier = Export | Ambient | Public | Private | Protected | Static | Default,
         AccessibilityModifier = Public | Private | Protected,
@@ -364,10 +370,10 @@ module ts {
         Failed = 2,
         FailedAndReported = 3
     }
-
+	
     export interface Node extends TextRange {
         kind: SyntaxKind;
-        flags: NodeFlags;
+        flags: NodeFlags; 
         // Specific context the parser was in when this node was created.  Normally undefined.
         // Only set when the parser was in some interesting context (like async/yield).
         /* @internal */ parserContextFlags?: ParserContextFlags;
@@ -1457,6 +1463,8 @@ module ts {
         /* @internal */ 
         ContainsObjectLiteral = 0x00080000,  // Type is or contains object literal type
         ESSymbol                = 0x00100000,  // Type of symbol primitive introduced in ES6
+		
+        IsArray                   = 0x00200000,  // for lua
 
         /* @internal */ 
         Intrinsic = Any | String | Number | Boolean | ESSymbol | Void | Undefined | Null,
@@ -1589,6 +1597,7 @@ module ts {
     /* @internal */
     export interface TypeMapper {
         (t: TypeParameter): Type;
+        mappings?: Map<Type>;  // Type mapping cache
     }
 
     /* @internal */
@@ -1910,3 +1919,4 @@ module ts {
         getModificationCount(): number;
     }
 }
+

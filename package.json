@@ -1,5 +1,5 @@
 {
-    "name": "typescript",
+    "name": "tstolua",
     "author": "Microsoft Corp.",
     "homepage": "http://typescriptlang.org/",
     "version": "1.5.2",
@@ -22,8 +22,7 @@
     "preferGlobal": true,
     "main": "./bin/typescript.js",
     "bin": {
-        "tsc": "./bin/tsc",
-        "tsserver": "./bin/tsserver"
+        "tstolua": "./built/local/tsc"
     },
     "engines": {
         "node": ">=0.8.0"

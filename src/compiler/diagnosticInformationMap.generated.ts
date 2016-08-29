@@ -545,5 +545,10 @@ module ts {
         Only_identifiers_Slashqualified_names_with_optional_type_arguments_are_currently_supported_in_a_class_extends_clauses: { code: 9002, category: DiagnosticCategory.Error, key: "Only identifiers/qualified-names with optional type arguments are currently supported in a class 'extends' clauses." },
         class_expressions_are_not_currently_supported: { code: 9003, category: DiagnosticCategory.Error, key: "'class' expressions are not currently supported." },
         class_declarations_are_only_supported_directly_inside_a_module_or_as_a_top_level_declaration: { code: 9004, category: DiagnosticCategory.Error, key: "'class' declarations are only supported directly inside a module or as a top level declaration." },
+		
+		string_length_is_readonly: { code: 100001, category: DiagnosticCategory.Error, key: "string .length attribute is readonly." }, // for lua
+		//regex_not_support_b : { code: 100001, category: DiagnosticCategory.Error, key: "not support \b in regex for lua." }, // for lua
+		//regex_not_support_B : { code: 100002, category: DiagnosticCategory.Error, key: "not support \B in regex for lua." }, // for lua
+		//regex_not_support_u : { code: 100003, category: DiagnosticCategory.Error, key: "not support \u in regex for lua." }, // for lua
     };
 }
