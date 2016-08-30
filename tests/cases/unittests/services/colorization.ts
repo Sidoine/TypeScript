@@ -9,8 +9,8 @@ interface ClassificationEntry {
 
 describe('Colorization', function () {
     // Use the shim adapter to ensure test coverage of the shim layer for the classifier
-    var languageServiceAdabtor = new Harness.LanguageService.ShimLanugageServiceAdapter();
-    var classifier = languageServiceAdabtor.getClassifier();
+    var languageServiceAdapter = new Harness.LanguageService.ShimLanugageServiceAdapter(/*preprocessToResolve*/ false);
+    var classifier = languageServiceAdapter.getClassifier();
 
     function getEntryAtPosistion(result: ts.ClassificationResult, position: number) {
         var entryPosition = 0;
@@ -66,7 +66,6 @@ describe('Colorization', function () {
 
     describe("test getClassifications", function () {
         it("Returns correct token classes", function () {
-            debugger;
             testLexicalClassification("var x: string = \"foo\"; //Hello",
                 ts.EndOfLineState.None,
                 keyword("var"),
@@ -138,7 +137,6 @@ describe('Colorization', function () {
         });
 
         it("correctly classifies the continuing line of a multi-line string ending in one backslash", function () {
-            debugger;
             testLexicalClassification("\\",
                 ts.EndOfLineState.InDoubleQuoteStringLiteral,
                 stringLiteral("\\"),

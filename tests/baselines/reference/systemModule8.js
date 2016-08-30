@@ -31,7 +31,9 @@ export const {a: z0, b: {c: z1}} = {a: true, b: {c: "123"}};
 for ([x] of [[1]]) {}
 
 //// [systemModule8.js]
-System.register([], function(exports_1) {
+System.register([], function(exports_1, context_1) {
+    "use strict";
+    var __moduleName = context_1 && context_1.id;
     var x, y, z0, z1;
     function foo() {
         exports_1("x", x = 100);
@@ -65,6 +67,6 @@ System.register([], function(exports_1) {
                 exports_1("x", x = _b[_i][0]);
             }
         }
-        var _a;
     }
+    var _a;
 });

@@ -70,8 +70,7 @@ class SomeDerivedClass extends SomeBaseClass {
 var __extends = (this && this.__extends) || function (d, b) {
     for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
     function __() { this.constructor = d; }
-    __.prototype = b.prototype;
-    d.prototype = new __();
+    d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
 };
 var SomeBaseClass = (function () {
     function SomeBaseClass() {
@@ -83,7 +82,7 @@ var SomeBaseClass = (function () {
         return 3;
     };
     return SomeBaseClass;
-})();
+}());
 var SomeDerivedClass = (function (_super) {
     __extends(SomeDerivedClass, _super);
     function SomeDerivedClass() {
@@ -128,4 +127,4 @@ var SomeDerivedClass = (function (_super) {
         configurable: true
     });
     return SomeDerivedClass;
-})(SomeBaseClass);
+}(SomeBaseClass));

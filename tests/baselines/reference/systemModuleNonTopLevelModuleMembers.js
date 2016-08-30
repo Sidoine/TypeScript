@@ -13,7 +13,9 @@ export module TopLevelModule2 {
 }
 
 //// [systemModuleNonTopLevelModuleMembers.js]
-System.register([], function(exports_1) {
+System.register([], function(exports_1, context_1) {
+    "use strict";
+    var __moduleName = context_1 && context_1.id;
     var TopLevelClass, TopLevelModule, TopLevelEnum, TopLevelModule2;
     function TopLevelFunction() { }
     exports_1("TopLevelFunction", TopLevelFunction);
@@ -24,22 +26,22 @@ System.register([], function(exports_1) {
                 function TopLevelClass() {
                 }
                 return TopLevelClass;
-            })();
+            }());
             exports_1("TopLevelClass", TopLevelClass);
             (function (TopLevelModule) {
                 var v;
             })(TopLevelModule = TopLevelModule || (TopLevelModule = {}));
-            exports_1("TopLevelModule", TopLevelModule)
+            exports_1("TopLevelModule", TopLevelModule);
             (function (TopLevelEnum) {
                 TopLevelEnum[TopLevelEnum["E"] = 0] = "E";
             })(TopLevelEnum || (TopLevelEnum = {}));
-            exports_1("TopLevelEnum", TopLevelEnum)
+            exports_1("TopLevelEnum", TopLevelEnum);
             (function (TopLevelModule2) {
                 var NonTopLevelClass = (function () {
                     function NonTopLevelClass() {
                     }
                     return NonTopLevelClass;
-                })();
+                }());
                 TopLevelModule2.NonTopLevelClass = NonTopLevelClass;
                 var NonTopLevelModule;
                 (function (NonTopLevelModule) {
@@ -52,7 +54,7 @@ System.register([], function(exports_1) {
                 })(TopLevelModule2.NonTopLevelEnum || (TopLevelModule2.NonTopLevelEnum = {}));
                 var NonTopLevelEnum = TopLevelModule2.NonTopLevelEnum;
             })(TopLevelModule2 = TopLevelModule2 || (TopLevelModule2 = {}));
-            exports_1("TopLevelModule2", TopLevelModule2)
+            exports_1("TopLevelModule2", TopLevelModule2);
         }
     }
 });
