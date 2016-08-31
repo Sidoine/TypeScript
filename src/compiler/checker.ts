@@ -6301,6 +6301,10 @@ namespace ts {
 			if ( isArrayType(type) || isInnerArrayInterface(type)) {
 				return true;
 			}
+
+            if (type.flags & TypeFlags.Intersection &&((<IntersectionType>type).types.some(x => (x.flags & TypeFlags.Interface) !== 0))) {
+                return true;
+            }
 			
 			if ( type.flags&TypeFlags.Interface ) {
 				//if ( type.symbol && 
@@ -9058,13 +9062,13 @@ namespace ts {
 
             if (prop.parent && prop.parent.flags & SymbolFlags.Class) {
                 checkClassPropertyAccess(node, left, apparentType, prop);
+			 }
 					
 					//add by qjb for lua emitter
 					if (type.flags & TypeFlags.Class) {
 						node.flags = node.flags | NodeFlags.ParentIsClassObject;
 					}
-            }
-				
+           	
 				if (isInnerObjectInterface(type)){
 					node.flags = node.flags | NodeFlags.ParentIsClassObject;
 				}

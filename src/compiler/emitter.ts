@@ -851,10 +851,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
                     else {
                         write(" ");
                     }
-                    //write("var "); 
-					write(lua_getVarDefineString() + " ");
-                    emitCommaList(tempVariables);
-                    write(";");
+                    //write("var ");
+                    // emitCommaList(tempVariables);
+                    for (const temp of tempVariables) {
+                        write(lua_getVarDefineString() + " ");
+                        emit(temp);
+                        write(";");
+                    }					
                 }
             }
 
@@ -2270,8 +2273,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 
                 emit(node.expression);
                 const indentedBeforeDot = indentIfOnDifferentLines(node, node.expression, node.dotToken);
-				lua_wirteCallDot(writer, node);
-
+				
                 // 1 .toString is a valid property access, emit a space after the literal
                 // Also emit a space if expression is a integer const enum value - it will appear in generated code as numeric literal
                 let shouldEmitSpace = false;
@@ -2290,14 +2292,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
                 }
 
                 if (shouldEmitSpace) {
-                    write(" .");
+                    write(" ");
                 }
-                else {
-                    write(".");
-                }
+                
+                lua_writeCallDot(writer, node);
 
                 const indentedAfterDot = indentIfOnDifferentLines(node, node.dotToken, node.name);
-                lua_wirteCallName(writer, node, ()=>{
+                lua_writeCallName(writer, node, ()=>{
 					emit(node.name);
 				}); 
                 decreaseIndentIf(indentedBeforeDot, indentedAfterDot);
@@ -2486,7 +2487,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
  			        lua_clearNodeFlagInEmitCallExpression(superCall, node);
 					if ( lua_isSomeGlobalStringMethod(node) ) {
                         lua_clearNodeFlagInEmitCallExpression(true, node);
-						lua_setIngoreClassObjectMethodCall(node);
+						lua_setIgnoreClassObjectMethodCall(node);
 						lua_writeSomeGlobalStringMethod(writer, node);
                     }
                     emit(expression);
@@ -2509,7 +2510,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 					}
 					else {
 						write("(");
-						lua_wirteCallParams(writer, node, emit, ()=>{
+						lua_writeCallParams(writer, node, emit, ()=>{
 							emitCommaList(node.arguments);
 						}) 
 						write(")"); 
@@ -3274,7 +3275,7 @@ lua_pushBlockType('do', writer);
                         started = true;
                     }
                     else {
-                        write(", ");
+                        write("; " + lua_getVarDefineString() + " ");
                     }
 
                     emit(decl);
@@ -4285,7 +4286,7 @@ lua_pushBlockType('do', writer);
              */
             function emitAssignment(name: Identifier, value: Expression, shouldEmitCommaBeforeAssignment: boolean, nodeForSourceMap: Node) {
                 if (shouldEmitCommaBeforeAssignment) {
-                    write(", ");
+                    write("; " + lua_getVarDefineString() + " ");
                 }
 
                 const exportChanged = isNameOfExportedSourceLevelDeclarationInSystemExternalModule(name);
@@ -6168,11 +6169,11 @@ const _super = (function (geti, seti) {
                 writeLine();
                 write("end"); //for lua  emitToken(SyntaxKind.CloseBraceToken, node.members.end);
                 emitStart(node);
-                write("(");
+                write(")(");
                 if (baseTypeNode) {
                     emit(baseTypeNode.expression);
                 }
-                write("))");
+                write(")");
                 if (node.kind === SyntaxKind.ClassDeclaration) {
                     write(";");
                 }
@@ -7570,7 +7571,7 @@ const _super = (function (geti, seti) {
                         }
 
                         if (i !== 0) {
-                            write(", ");
+                            write("; " + lua_getVarDefineString() + ' ');
                         }
 
                         if (local.kind === SyntaxKind.ClassDeclaration || local.kind === SyntaxKind.ModuleDeclaration || local.kind === SyntaxKind.EnumDeclaration) {
@@ -8026,24 +8027,24 @@ const _super = (function (geti, seti) {
             }
 
             function emitAMDDependencyList({ aliasedModuleNames, unaliasedModuleNames }: AMDDependencyNames) {
+                write("{");
                 if (aliasedModuleNames.length) {
-                    write(", ");
                     write(aliasedModuleNames.join(", "));
                 }
                 if (unaliasedModuleNames.length) {
-                    write(", ");
+                    if (aliasedModuleNames.length) write(", ");
                     write(unaliasedModuleNames.join(", "));
                 }
                 write("}");
             }
 
             function emitAMDFactoryHeader({ importAliasNames }: AMDDependencyNames) {
-                write("function (require, exports");
+                write("function (__exports");
                 if (importAliasNames.length) {
                     write(", ");
                     write(importAliasNames.join(", "));
                 }
-                write(") {");
+                write(")");
             }
 
             function emitAMDModule(node: SourceFile, emitRelativePathAsModuleName?: boolean) {
@@ -8054,8 +8055,7 @@ const _super = (function (geti, seti) {
                 write("local _addonName, _addon = ...");
                 writeLine();
                 write("define(_addonName, _addon, ");
-                write("\"" + node.fileName.replace(/\.ts$/, '') + "\", ");
-                writeModuleName(node, emitRelativePathAsModuleName);
+                writeModuleName(node, true);
                 emitAMDDependencies(node, /*includeNonAmdDependencies*/ true, emitRelativePathAsModuleName);
                 increaseIndent();
                 const startIndex = emitDirectivePrologues(node.statements, /*startWithNewLine*/ true, /*ensureUseStrict*/!compilerOptions.noImplicitUseStrict);
@@ -8250,12 +8250,12 @@ const _super = (function (geti, seti) {
             }
 
             function ensureUseStrictPrologue(startWithNewLine: boolean, writeUseStrict: boolean) {
-                if (writeUseStrict) {
-                    if (startWithNewLine) {
-                        writeLine();
-                    }
-                    write("\"use strict\";");
-                }
+                // if (writeUseStrict) {
+                //     if (startWithNewLine) {
+                //         writeLine();
+                //     }
+                //     write("\"use strict\";");
+                // }
             }
 
             function emitDirectivePrologues(statements: Node[], startWithNewLine: boolean, ensureUseStrict?: boolean): number {
@@ -8358,14 +8358,14 @@ const _super = (function (geti, seti) {
                 }
 
                 emitLeadingComments(node.endOfFileToken);
-				if (isHasExports){
-					writeLine();
-					write('return __exports;');
-				}
-				else if ( isHasExport ) {
-					writeLine();
-					write('return __export;');
-				}
+				// if (isHasExports){
+				// 	writeLine();
+				// 	write('return __exports;');
+				// }
+				// else if ( isHasExport ) {
+				// 	writeLine();
+				// 	write('return __export;');
+				// }
             }
 
             function emit(node: Node): void {

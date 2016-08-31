@@ -401,7 +401,7 @@ namespace ts {
 		IsClassObjectMethodCall = 1<<27, //add by qjb for lua
 		IsArray = 1<<28, //add by qjb for lua
 		IsString = 1<<29, //add by qjb for lua
-		IngoreClassObjectMethodCall = 1<<31, //add by qjb for lua
+		IgnoreClassObjectMethodCall = 1<<31, //add by qjb for lua
         // This was picked out from the 'master' branch.
         // To keep the flags consistent, we're skipping a few ahead.
         HasJsxSpreadAttribute = 1 << 30,

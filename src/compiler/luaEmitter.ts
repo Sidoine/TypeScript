@@ -21,16 +21,16 @@ module ts {
 		}
 	}
 	
-	export function lua_setIngoreClassObjectMethodCall(node: CallExpression) { 
-		node.expression.flags = node.expression.flags | NodeFlags.IngoreClassObjectMethodCall; 
+	export function lua_setIgnoreClassObjectMethodCall(node: CallExpression) { 
+		node.expression.flags = node.expression.flags | NodeFlags.IgnoreClassObjectMethodCall; 
 	}
 	
-	export function lua_wirteCallDot(writer: EmitTextWriter, node: PropertyAccessExpression){
+	export function lua_writeCallDot(writer: EmitTextWriter, node: PropertyAccessExpression){
 		if ( node.flags & NodeFlags.IsClassObjectMethodCall ){
 			writer.write(":");
 			return;
 		}
-		else if (node.flags & NodeFlags.IngoreClassObjectMethodCall) {
+		else if (node.flags & NodeFlags.IgnoreClassObjectMethodCall) {
 			return;
 		}
 		else if ( node.flags & NodeFlags.IsString ) {
@@ -43,7 +43,7 @@ module ts {
 		writer.write(".");
 	}
 	
-	export function lua_wirteCallName(writer: EmitTextWriter, node: PropertyAccessExpression, callMethod:any) {
+	export function lua_writeCallName(writer: EmitTextWriter, node: PropertyAccessExpression, callMethod:any) {
 		if ( node.flags & NodeFlags.IsString ) {
 			let name:string = node.name.text;
 			let luaName = lua_stringMethods[name];
@@ -69,7 +69,7 @@ module ts {
 		return expr.name.text;
 	}
 	
-	export function lua_wirteCallParams(writer: EmitTextWriter, node: CallExpression, emitNode:(node: Node)=>void, emitCommaList:()=>void) {
+	export function lua_writeCallParams(writer: EmitTextWriter, node: CallExpression, emitNode:(node: Node)=>void, emitCommaList:()=>void) {
 		emitCommaList();
 	}
 	
